@@ -1,12 +1,20 @@
 import { Controller, Get, Res } from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
+@ApiTags('Qr')
 @Controller('qr')
 export class QRController {
   constructor(private readonly whatsappService: WhatsAppService) {}
 
   @Get()
+  @ApiOperation({ summary: 'Serve HTML page with QR code auto-refresh' })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns an HTML page displaying WhatsApp QR code',
+    content: { 'text/html': { example: '<!DOCTYPE html>...' } },
+  })
   getQRPage(@Res() res: Response) {
     res.type('html').send(`
       <!DOCTYPE html>
