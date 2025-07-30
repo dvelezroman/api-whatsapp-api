@@ -68,8 +68,11 @@ RUN npm install --omit=dev
 
 # Copy build output from builder stage
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/whatsapp-session ./whatsapp-session
+
+# Create empty folder for WhatsApp session (will be mounted as a volume)
+RUN mkdir -p /app/whatsapp-session
 
 EXPOSE 3000
 
 CMD ["node", "dist/main"]
+

@@ -7,16 +7,15 @@ services:
       dockerfile: Dockerfile
     container_name: whatsapp-api
     ports:
-      - "3005:3005"
+      - "3000:3000"
     restart: always
     environment:
       - NODE_ENV=production
     volumes:
-      # Persist WhatsApp session so you don't need to scan QR again after restart
       - ./whatsapp-session:/app/whatsapp-session
     networks:
       - whatsapp_net
 
 networks:
   whatsapp_net:
-    driver: bridgen
+    driver: bridge
