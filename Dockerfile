@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install build dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Copy all source files
 COPY . .
@@ -72,7 +72,7 @@ COPY --from=builder /app/dist ./dist
 # Create empty folder for WhatsApp session (will be mounted as a volume)
 RUN mkdir -p /app/whatsapp-session
 
-EXPOSE 3000
+EXPOSE 3005
 
 CMD ["node", "dist/main"]
 
