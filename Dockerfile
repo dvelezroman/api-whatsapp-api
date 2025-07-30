@@ -1,3 +1,19 @@
+# ---------- BUILD STAGE ----------
+FROM node:22-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+COPY package*.json ./
+RUN npm install
+
+# Copy all source files
+COPY . .
+
+# Build NestJS project
+RUN npm run build
+
+# ---------- PRODUCTION STAGE ----------
 FROM node:22-slim
 
 # Install Chromium dependencies for Puppeteer
@@ -44,23 +60,16 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files first (better cache)
+# Copy only package files & install production dependencies
 COPY package*.json ./
+RUN npm install --omit=dev
 
-# Install dependencies
-RUN npm install
+# Copy build output from builder stage
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/whatsapp-session ./whatsapp-session
 
-# Copy source code
-COPY . .
-
-# Build the NestJS app
-RUN npm run build
-
-# Expose the NestJS API port
 EXPOSE 3000
 
-# Run the application
 CMD ["node", "dist/main"]
