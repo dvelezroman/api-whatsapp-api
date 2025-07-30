@@ -24,6 +24,7 @@
     "@nestjs/core": "^10.4.20",
     "@nestjs/platform-express": "^10.4.20",
     "@nestjs/swagger": "^11.2.0",
+    "class-validator": "^0.14.2",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "reflect-metadata": "^0.2.2",
