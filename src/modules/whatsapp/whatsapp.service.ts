@@ -54,9 +54,11 @@ export class WhatsAppService implements OnModuleInit {
 
   getQRCode() {
     if (!this.qrCodeData) {
-      return { status: 'no_qr', message: 'No QR code available at this moment' };
+      return {
+        status: 'no_qr',
+        message: 'No QR code available at this moment',
+      };
     }
     return { status: 'qr', qr: this.qrCodeData };
   }
 }
-
