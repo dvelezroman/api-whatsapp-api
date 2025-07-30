@@ -1,13 +1,22 @@
-version: '3.8'
+version: "3.8"
 
 services:
   whatsapp-api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: whatsapp-api
-    restart: always
     ports:
       - "3005:3005"
-    volumes:
-      - ./whatsapp-session:/app/whatsapp-session
+    restart: always
     environment:
       - NODE_ENV=production
+    volumes:
+      # Persist WhatsApp session so you don't need to scan QR again after restart
+      - ./whatsapp-session:/app/whatsapp-session
+    networks:
+      - whatsapp_net
+
+networks:
+  whatsapp_net:
+    driver: bridgen
