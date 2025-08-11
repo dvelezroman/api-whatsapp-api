@@ -72,7 +72,14 @@ COPY --from=builder /app/dist ./dist
 # Create empty folder for WhatsApp session (will be mounted as a volume)
 RUN mkdir -p /app/whatsapp-session
 
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
 EXPOSE 3005
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3005/health || exit 1
 
 CMD ["node", "dist/main"]
 
