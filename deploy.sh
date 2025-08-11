@@ -35,6 +35,12 @@ fi
 # Backup current session (just in case)
 print_status "Creating session backup..."
 if [ -d "whatsapp-session" ]; then
+    # Fix permissions before backup
+    print_status "Fixing session permissions before backup..."
+    sudo chown -R $(id -u):$(id -g) whatsapp-session 2>/dev/null || true
+    chmod -R 755 whatsapp-session 2>/dev/null || true
+    
+    # Create backup
     cp -r whatsapp-session whatsapp-session-backup-$(date +%Y%m%d-%H%M%S)
     print_status "Session backup created"
 else
