@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get } from '@nestjs/common';
+import { Controller, Post, Body, Get, Delete } from '@nestjs/common';
 import { WhatsAppService } from './whatsapp.service';
 import { ApiBody, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SendDto } from './dtos/send.dto';
@@ -15,6 +15,7 @@ import {
   DiffusionContactsResponseDto,
   ContactResponseDto,
 } from './dtos/contact.dto';
+import { WebhookConfigDto } from './dtos/webhook-config.dto';
 
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -190,5 +191,82 @@ export class WhatsAppController {
   async getContact(@Body() body: GetContactDto) {
     const { contactIdentifier, searchById } = body;
     return this.whatsappService.getContact(contactIdentifier, searchById);
+  }
+
+  // Webhook management endpoints
+  @Post('webhook/configure')
+  @ApiOperation({
+    summary: 'Configure webhook for handling messages from unknown contacts',
+    description:
+      'Sets up a webhook URL to forward messages from non-registered contacts to an external API',
+  })
+  @ApiBody({ type: WebhookConfigDto })
+  @ApiResponse({ status: 201, description: 'Webhook configured successfully' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid webhook configuration',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async configureWebhook(@Body() body: WebhookConfigDto) {
+    return this.whatsappService.configureWebhook(body);
+  }
+
+  @Get('webhook/config')
+  @ApiOperation({ summary: 'Get current webhook configuration' })
+  @ApiResponse({
+    status: 200,
+    description: 'Webhook configuration retrieved successfully',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async getWebhookConfig() {
+    return this.whatsappService.getWebhookConfig();
+  }
+
+  @Delete('webhook/remove')
+  @ApiOperation({ summary: 'Remove webhook configuration' })
+  @ApiResponse({
+    status: 200,
+    description: 'Webhook configuration removed successfully',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async removeWebhook() {
+    return this.whatsappService.removeWebhook();
+  }
+
+  @Post('webhook/test')
+  @ApiOperation({ summary: 'Test webhook configuration with sample data' })
+  @ApiResponse({
+    status: 200,
+    description: 'Webhook test completed successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - No webhook configured',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async testWebhook() {
+    const testData = {
+      messageId: 'test-message-id',
+      from: '1234567890@c.us',
+      sender: {
+        id: '1234567890@c.us',
+        phone: '1234567890',
+        pushname: 'Test User',
+        isBusiness: false,
+        isVerified: false,
+      },
+      message: {
+        body: 'This is a test message from webhook',
+        type: 'chat',
+        timestamp: Date.now(),
+      },
+      chat: {
+        id: '1234567890@c.us',
+        type: 'individual',
+      },
+      receivedAt: new Date().toISOString(),
+    };
+
+    return this.whatsappService.testWebhook(testData);
   }
 }

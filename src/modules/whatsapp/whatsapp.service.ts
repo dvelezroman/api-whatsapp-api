@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
 import * as QRCode from 'qrcode';
+import axios, { AxiosResponse } from 'axios';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class WhatsAppService implements OnModuleInit {
@@ -9,8 +11,21 @@ export class WhatsAppService implements OnModuleInit {
   private readonly logger = new Logger(WhatsAppService.name);
   private qrCodeData: string | null = null; // Store latest QR code
 
+  // Webhook configuration
+  private webhookConfig: {
+    url: string;
+    method: string;
+    apiKey?: string;
+    timeout: number;
+  } | null = null;
+
+  constructor(private configService: ConfigService) {}
+
   onModuleInit() {
     this.logger.log('Initializing WhatsApp Client...');
+
+    // Initialize webhook configuration from environment variables
+    this.initializeWebhookFromEnv();
 
     this.client = new Client({
       authStrategy: new LocalAuth({ dataPath: './whatsapp-session' }),
@@ -40,7 +55,161 @@ export class WhatsAppService implements OnModuleInit {
       this.logger.error('Authentication failed:', msg);
     });
 
+    // Listen for incoming messages
+    this.client.on('message', async (message) => {
+      await this.handleIncomingMessage(message);
+    });
+
     this.client.initialize();
+  }
+
+  private async handleIncomingMessage(message: any) {
+    try {
+      // Skip messages from self
+      if (message.fromMe) {
+        return;
+      }
+
+      // Get sender information
+      const sender = message.from;
+      const senderContact = await this.client.getContactById(sender);
+
+      // Check if sender is a registered contact (has name or pushname)
+      const isRegisteredContact = senderContact.name || senderContact.pushname;
+
+      // If unknown contact, save it first
+      if (!isRegisteredContact) {
+        await this.saveUnknownContact(senderContact);
+      }
+
+      // Forward to webhook if configured (for ALL contacts)
+      if (this.webhookConfig) {
+        await this.forwardToWebhook(
+          message,
+          senderContact,
+          Boolean(isRegisteredContact),
+        );
+      } else {
+        // Log messages when no webhook is configured
+        if (!isRegisteredContact) {
+          this.logger.warn(
+            `Message from unknown contact ${sender}: ${message.body}`,
+          );
+        } else {
+          this.logger.log(
+            `Message from registered contact ${senderContact.name || senderContact.pushname}: ${message.body}`,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error handling incoming message: ${error.message}`);
+    }
+  }
+
+  private async saveUnknownContact(senderContact: any) {
+    try {
+      const phone = senderContact.id.user;
+      const pushname = senderContact.pushname || 'Unknown';
+
+      // Use the existing saveContact method to validate and save
+      await this.saveContact(
+        phone,
+        pushname,
+        'Auto-saved from incoming message',
+      );
+
+      this.logger.log(`Auto-saved unknown contact: ${pushname} (${phone})`);
+    } catch (error) {
+      this.logger.error(`Error auto-saving unknown contact: ${error.message}`);
+      // Don't throw error to avoid breaking message processing
+    }
+  }
+
+  private initializeWebhookFromEnv() {
+    const webhookUrl = this.configService.get<string>('WEBHOOK_URL');
+    const webhookApiKey = this.configService.get<string>('WEBHOOK_API_KEY');
+    const webhookTimeout =
+      this.configService.get<number>('WEBHOOK_TIMEOUT') || 10000;
+
+    if (webhookUrl) {
+      this.webhookConfig = {
+        url: webhookUrl,
+        method: 'POST',
+        apiKey: webhookApiKey,
+        timeout: webhookTimeout,
+      };
+      this.logger.log(`Webhook configured from environment: ${webhookUrl}`);
+    } else {
+      this.logger.log('No webhook URL configured in environment variables');
+    }
+  }
+
+  private async forwardToWebhook(
+    message: any,
+    senderContact: any,
+    isRegisteredContact: boolean,
+  ) {
+    try {
+      const webhookData = {
+        messageId: message.id._serialized,
+        from: message.from,
+        sender: {
+          id: senderContact.id._serialized,
+          phone: senderContact.id.user,
+          pushname: senderContact.pushname,
+          name: senderContact.name,
+          isBusiness: senderContact.isBusiness,
+          isVerified: senderContact.isVerified,
+          isRegisteredContact: isRegisteredContact,
+        },
+        message: {
+          body: message.body,
+          type: message.type,
+          timestamp: message.timestamp,
+        },
+        chat: {
+          id: message.from,
+          type: message.chat.isGroup ? 'group' : 'individual',
+        },
+        receivedAt: new Date().toISOString(),
+      };
+
+      this.logger.log(
+        `Forwarding message to webhook: ${this.webhookConfig.url}`,
+      );
+
+      const response: AxiosResponse = await axios({
+        method: this.webhookConfig.method,
+        url: this.webhookConfig.url,
+        data: webhookData,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.webhookConfig.apiKey && {
+            Authorization: `Bearer ${this.webhookConfig.apiKey}`,
+          }),
+        },
+        timeout: this.webhookConfig.timeout,
+      });
+
+      // Handle webhook response
+      if (response.data && response.data.reply) {
+        await this.sendMessage(message.from, response.data.reply);
+        this.logger.log(
+          `Sent reply to ${message.from}: ${response.data.reply}`,
+        );
+      }
+
+      this.logger.log(`Webhook response received: ${response.status}`);
+    } catch (error) {
+      this.logger.error(`Error forwarding to webhook: ${error.message}`);
+
+      // Optionally send a default response on webhook failure
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        this.logger.warn(
+          `Webhook unavailable, message from ${message.from} not processed`,
+        );
+      }
+    }
   }
 
   async sendMessage(phone: string, message: string) {
@@ -601,6 +770,83 @@ export class WhatsAppService implements OnModuleInit {
       } else {
         throw new Error(`CONTACT_ERROR: ${error.message}`);
       }
+    }
+  }
+
+  // Webhook configuration methods
+  async configureWebhook(config: {
+    url: string;
+    method?: string;
+    apiKey?: string;
+    timeout?: number;
+  }) {
+    this.webhookConfig = {
+      url: config.url,
+      method: config.method || 'POST',
+      apiKey: config.apiKey,
+      timeout: config.timeout || 10000,
+    };
+
+    this.logger.log(`Webhook configured: ${config.url}`);
+    return {
+      status: 'success',
+      message: 'Webhook configured successfully',
+      config: this.webhookConfig,
+    };
+  }
+
+  async getWebhookConfig() {
+    if (!this.webhookConfig) {
+      return {
+        status: 'not_configured',
+        message: 'No webhook configured',
+      };
+    }
+
+    return {
+      status: 'success',
+      config: this.webhookConfig,
+    };
+  }
+
+  async removeWebhook() {
+    this.webhookConfig = null;
+    this.logger.log('Webhook configuration removed');
+    return {
+      status: 'success',
+      message: 'Webhook configuration removed successfully',
+    };
+  }
+
+  async testWebhook(testData: any) {
+    if (!this.webhookConfig) {
+      throw new Error('No webhook configured');
+    }
+
+    try {
+      const response: AxiosResponse = await axios({
+        method: this.webhookConfig.method,
+        url: this.webhookConfig.url,
+        data: testData,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.webhookConfig.apiKey && {
+            Authorization: `Bearer ${this.webhookConfig.apiKey}`,
+          }),
+        },
+        timeout: this.webhookConfig.timeout,
+      });
+
+      return {
+        status: 'success',
+        message: 'Webhook test successful',
+        response: {
+          status: response.status,
+          data: response.data,
+        },
+      };
+    } catch (error) {
+      throw new Error(`Webhook test failed: ${error.message}`);
     }
   }
 }

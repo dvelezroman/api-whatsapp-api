@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
@@ -9,7 +10,14 @@ import { QRController } from './modules/qr/qr.controller';
 import { QrService } from './modules/qr/qr.service';
 
 @Module({
-  imports: [WhatsAppModule, QrModule],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
+    WhatsAppModule,
+    QrModule,
+  ],
   controllers: [AppController, WhatsAppController, QRController],
   providers: [AppService, WhatsAppService, QrService],
 })
