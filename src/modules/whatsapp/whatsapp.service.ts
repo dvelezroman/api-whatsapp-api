@@ -232,28 +232,6 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
-  async sendTextMessage(rawNumber: string, text: string) {
-    try {
-      await this.ensureReady();
-      const wid = await this.resolveWhatsAppId(rawNumber);
-      const msg = await this.client.sendMessage(wid, text);
-      this.logger.log(`Message ${msg.id.id} sent to ${wid}`);
-      return { id: msg.id.id, to: wid };
-    } catch (err: any) {
-      // Make errors actionable and avoid the vague Puppeteer "Evaluation failed"
-      const code = err?.message?.includes('NUMBER_NOT_ON_WHATSAPP')
-        ? 'NUMBER_NOT_ON_WHATSAPP'
-        : err?.message?.includes('CLIENT_NOT_READY')
-          ? 'CLIENT_NOT_READY'
-          : err?.message?.includes('Evaluation failed')
-            ? 'BROWSER_EVAL_FAILED'
-            : 'MESSAGE_SEND_ERROR';
-
-      this.logger.error(`${code}: ${err?.message || err} (to ${rawNumber})`);
-      throw new Error(code);
-    }
-  }
-
   async sendMessage(phone: string, message: string) {
     try {
       // Format phone number to WhatsApp format
