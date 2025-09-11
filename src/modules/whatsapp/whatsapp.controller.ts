@@ -38,7 +38,7 @@ export class WhatsAppController {
   @ApiResponse({ status: 400, description: 'Bad request' })
   async sendMessage(@Body() body: SendDto) {
     const { phone, message } = body;
-    return this.whatsappService.sendMessage(phone, message);
+    return this.whatsappService.sendTextMessage(phone, message);
   }
 
   @Post('contacts')
