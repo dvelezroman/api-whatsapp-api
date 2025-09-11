@@ -31,6 +31,35 @@ export class WhatsAppController {
     return this.whatsappService.getQRCode();
   }
 
+  @Get('status')
+  @ApiOperation({ summary: 'Get WhatsApp client status' })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns the current status of the WhatsApp client.',
+  })
+  async getClientStatus() {
+    return this.whatsappService.getClientStatus();
+  }
+
+  @Post('restart')
+  @ApiOperation({ summary: 'Restart WhatsApp client' })
+  @ApiResponse({
+    status: 200,
+    description: 'WhatsApp client restarted successfully.',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Failed to restart WhatsApp client.',
+  })
+  async restartClient() {
+    await this.whatsappService.restartClient();
+    return {
+      status: 'success',
+      message: 'WhatsApp client restarted successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Post('send')
   @ApiOperation({ summary: 'Send a WhatsApp message' })
   @ApiBody({ type: SendDto })

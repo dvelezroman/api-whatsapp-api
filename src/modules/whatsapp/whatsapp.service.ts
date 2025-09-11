@@ -10,6 +10,9 @@ export class WhatsAppService implements OnModuleInit {
   private client: Client;
   private readonly logger = new Logger(WhatsAppService.name);
   private qrCodeData: string | null = null; // Store latest QR code
+  private isClientReady: boolean = false; // Track client readiness
+  private isClientAuthenticated: boolean = false; // Track client authentication
+  private webHelpersInjected: boolean = false; // Track if WhatsApp Web helpers are injected
 
   // Webhook configuration
   private webhookConfig: {
@@ -20,6 +23,45 @@ export class WhatsAppService implements OnModuleInit {
   } | null = null;
 
   constructor(private configService: ConfigService) {}
+
+  private async testWebHelpers(): Promise<boolean> {
+    try {
+      // Try to get a simple chat to test if helpers are working
+      const chats = await this.client.getChats();
+      return Array.isArray(chats);
+    } catch (error) {
+      this.logger.warn(`Web helpers test failed: ${error.message}`);
+      return false;
+    }
+  }
+
+  private async checkClientReady(): Promise<void> {
+    if (!this.client) {
+      throw new Error(
+        'CLIENT_NOT_INITIALIZED: WhatsApp client has not been initialized yet. Please wait for the client to initialize.',
+      );
+    }
+    if (!this.isClientAuthenticated) {
+      throw new Error(
+        'CLIENT_NOT_AUTHENTICATED: WhatsApp client is not authenticated yet. Please scan the QR code to authenticate.',
+      );
+    }
+    if (!this.isClientReady) {
+      throw new Error(
+        'CLIENT_NOT_READY: WhatsApp client is authenticated but not ready yet. Please wait for the client to fully initialize.',
+      );
+    }
+
+    // Test if WhatsApp Web helpers are actually working
+    const helpersWorking = await this.testWebHelpers();
+    if (!helpersWorking) {
+      this.webHelpersInjected = false;
+      throw new Error(
+        'WEB_HELPERS_NOT_INJECTED: WhatsApp Web helpers are not properly injected. This may be due to a version mismatch or the client needs to be restarted.',
+      );
+    }
+    this.webHelpersInjected = true;
+  }
 
   onModuleInit() {
     this.logger.log('Initializing WhatsApp Client...');
@@ -45,14 +87,18 @@ export class WhatsAppService implements OnModuleInit {
     this.client.on('ready', () => {
       this.logger.log('WhatsApp Client is ready!');
       this.qrCodeData = null; // No QR needed anymore
+      this.isClientReady = true; // Mark client as ready
     });
 
     this.client.on('authenticated', () => {
       this.logger.log('WhatsApp Client authenticated successfully!');
+      this.isClientAuthenticated = true; // Mark client as authenticated
     });
 
     this.client.on('auth_failure', (msg) => {
       this.logger.error('Authentication failed:', msg);
+      this.isClientReady = false; // Mark client as not ready
+      this.isClientAuthenticated = false; // Mark client as not authenticated
     });
 
     // Listen for incoming messages
@@ -234,38 +280,50 @@ export class WhatsAppService implements OnModuleInit {
 
   async sendMessage(phone: string, message: string) {
     try {
-      // Format phone number to WhatsApp format
-      const formattedPhone = phone.includes('@c.us')
-        ? phone
-        : phone.replace(/\D/g, '') + '@c.us';
+      return await this.retryOperation(async () => {
+        // Check if client is ready before proceeding
+        await this.checkClientReady();
 
-      // Validate if contact exists and was manually created
-      const contact = await this.client.getContactById(formattedPhone);
+        // Format phone number to WhatsApp format
+        const formattedPhone = phone.includes('@c.us')
+          ? phone
+          : phone.replace(/\D/g, '') + '@c.us';
 
-      // Check if contact was manually created (has a name or pushname)
-      const contactName = contact.name || contact.pushname;
-      if (!contactName) {
-        throw new Error(
-          `Contact with phone ${formattedPhone} exists but was not manually created. Please add this contact to your phone's contact list first.`,
-        );
-      }
+        // Validate if contact exists and was manually created
+        const contact = await this.client.getContactById(formattedPhone);
 
-      // Send message to the validated contact
-      await this.client.sendMessage(formattedPhone, message);
+        // Check if contact was manually created (has a name or pushname)
+        const contactName = contact.name || contact.pushname;
+        if (!contactName) {
+          throw new Error(
+            `Contact with phone ${formattedPhone} exists but was not manually created. Please add this contact to your phone's contact list first.`,
+          );
+        }
 
-      this.logger.log(`Message sent to ${contactName} (${formattedPhone})`);
+        // Send message to the validated contact
+        await this.client.sendMessage(formattedPhone, message);
 
-      return {
-        status: 'success',
-        phone: formattedPhone,
-        contactName,
-        message,
-        sentAt: new Date().toISOString(),
-      };
+        this.logger.log(`Message sent to ${contactName} (${formattedPhone})`);
+
+        return {
+          status: 'success',
+          phone: formattedPhone,
+          contactName,
+          message,
+          sentAt: new Date().toISOString(),
+        };
+      });
     } catch (error) {
       this.logger.error(`Error sending message to ${phone}: ${error.message}`);
 
-      if (error.message.includes('not found')) {
+      if (
+        error.message.includes('CLIENT_NOT_INITIALIZED') ||
+        error.message.includes('CLIENT_NOT_AUTHENTICATED') ||
+        error.message.includes('CLIENT_NOT_READY') ||
+        error.message.includes('WEB_HELPERS_NOT_INJECTED')
+      ) {
+        throw new Error(error.message);
+      } else if (error.message.includes('not found')) {
         throw new Error(
           `CONTACT_NOT_FOUND: Contact with phone ${phone} not found. Please add this contact to your phone's contact list first.`,
         );
@@ -283,6 +341,9 @@ export class WhatsAppService implements OnModuleInit {
 
   async saveContact(phone: string, name?: string, description?: string) {
     try {
+      // Check if client is ready before proceeding
+      await this.checkClientReady();
+
       // Format phone number to WhatsApp format
       const formattedPhone = phone.replace(/\D/g, '') + '@c.us';
 
@@ -334,8 +395,114 @@ export class WhatsAppService implements OnModuleInit {
     return { status: 'qr', qr: this.qrCodeData };
   }
 
+  getClientStatus() {
+    let status = 'initializing';
+    if (this.isClientReady) {
+      status = 'ready';
+    } else if (this.isClientAuthenticated) {
+      status = 'authenticated_but_not_ready';
+    } else if (this.qrCodeData) {
+      status = 'waiting_for_qr_scan';
+    } else if (this.client) {
+      status = 'initializing';
+    }
+
+    return {
+      isClientInitialized: !!this.client,
+      isClientAuthenticated: this.isClientAuthenticated,
+      isClientReady: this.isClientReady,
+      webHelpersInjected: this.webHelpersInjected,
+      hasQRCode: !!this.qrCodeData,
+      status,
+    };
+  }
+
+  async waitForClientReady(timeoutMs: number = 30000): Promise<boolean> {
+    if (this.isClientReady && this.webHelpersInjected) {
+      return true;
+    }
+
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      const checkInterval = setInterval(async () => {
+        if (this.isClientReady) {
+          // Test if helpers are actually working
+          const helpersWorking = await this.testWebHelpers();
+          if (helpersWorking) {
+            this.webHelpersInjected = true;
+            clearInterval(checkInterval);
+            resolve(true);
+          }
+        } else if (Date.now() - startTime > timeoutMs) {
+          clearInterval(checkInterval);
+          resolve(false);
+        }
+      }, 1000); // Check every 1 second
+    });
+  }
+
+  private async retryOperation<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    delayMs: number = 2000,
+  ): Promise<T> {
+    let lastError: Error;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+
+        // If it's a web helpers issue, wait and retry
+        if (
+          error.message.includes('WEB_HELPERS_NOT_INJECTED') ||
+          error.message.includes('getContact') ||
+          error.message.includes('getChat')
+        ) {
+          this.logger.warn(
+            `Attempt ${attempt}/${maxRetries} failed due to web helpers issue, retrying in ${delayMs}ms...`,
+          );
+
+          if (attempt < maxRetries) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            // Reset the web helpers flag to force re-test
+            this.webHelpersInjected = false;
+            continue;
+          }
+        }
+
+        // For other errors, don't retry
+        throw error;
+      }
+    }
+
+    throw lastError;
+  }
+
+  async restartClient(): Promise<void> {
+    this.logger.log('Restarting WhatsApp client...');
+
+    // Reset all state flags
+    this.isClientReady = false;
+    this.isClientAuthenticated = false;
+    this.webHelpersInjected = false;
+    this.qrCodeData = null;
+
+    // Destroy existing client
+    if (this.client) {
+      await this.client.destroy();
+    }
+
+    // Reinitialize client
+    this.onModuleInit();
+  }
+
   async getAllGroups() {
     try {
+      // Check if client is ready before proceeding
+      await this.checkClientReady();
+
       // Get all groups from WhatsApp using the correct method
       const chats = await this.client.getChats();
       const groups = chats.filter((chat) => chat.isGroup);
@@ -734,6 +901,9 @@ export class WhatsAppService implements OnModuleInit {
 
   async getContact(contactIdentifier: string, searchById: boolean = false) {
     try {
+      // Check if client is ready before proceeding
+      await this.checkClientReady();
+
       let contact;
 
       if (searchById) {
