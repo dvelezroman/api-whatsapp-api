@@ -5,7 +5,8 @@ WORKDIR /app
 
 # Install build dependencies
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
+COPY .npmrc ./
+RUN npm ci --legacy-peer-deps
 
 # Copy all source files
 COPY . .
@@ -64,7 +65,8 @@ WORKDIR /app
 
 # Copy only package files & install production dependencies
 COPY package*.json ./
-RUN npm install --omit=dev --legacy-peer-deps
+COPY .npmrc ./
+RUN npm ci --omit=dev --legacy-peer-deps
 
 # Copy build output from builder stage
 COPY --from=builder /app/dist ./dist
