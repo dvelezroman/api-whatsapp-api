@@ -17,11 +17,16 @@ RUN npm run build
 # ---------- PRODUCTION STAGE ----------
 FROM node:22-slim
 
-# Install Chromium dependencies for Puppeteer
+# Set environment variables for Puppeteer
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Install Chromium and dependencies for Puppeteer 18.2.1
 RUN apt-get update && apt-get install -y \
-    wget \
     ca-certificates \
     fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-noto-cjk \
     libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -54,10 +59,9 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     libxss1 \
     libxtst6 \
-    lsb-release \
     xdg-utils \
-    libu2f-udev \
-    libvulkan1 \
+    curl \
+    chromium \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
@@ -73,9 +77,6 @@ COPY --from=builder /app/dist ./dist
 
 # Create empty folder for WhatsApp session (will be mounted as a volume)
 RUN mkdir -p /app/whatsapp-session
-
-# Install curl for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 3005
 
