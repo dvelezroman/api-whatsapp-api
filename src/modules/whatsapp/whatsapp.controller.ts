@@ -20,6 +20,10 @@ import {
   ContactResponseDto,
 } from './dtos/contact.dto';
 import { ContactsResponseDto } from './dtos/contacts-response.dto';
+import { CreateGroupDto } from './dtos/create-group.dto';
+import { CreateGroupResponseDto } from './dtos/create-group-response.dto';
+import { CreateDiffusionGroupDto } from './dtos/create-diffusion-group.dto';
+import { CreateDiffusionGroupResponseDto } from './dtos/create-diffusion-group-response.dto';
 import { WebhookConfigDto } from './dtos/webhook-config.dto';
 import { WebhookConfigResponseDto } from './dtos/webhook-config-response.dto';
 
@@ -329,5 +333,55 @@ export class WhatsAppController {
     };
 
     return this.whatsappService.testWebhook(testData);
+  }
+
+  @Post('create-group')
+  @ApiOperation({ summary: 'Create a new WhatsApp group' })
+  @ApiBody({ type: CreateGroupDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Group created successfully',
+    type: CreateGroupResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid group data or participants',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'One or more participants not found on WhatsApp',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async createGroup(@Body() body: CreateGroupDto) {
+    const { name, participants, description } = body;
+    return this.whatsappService.createGroup(name, participants, description);
+  }
+
+  @Post('create-diffusion-group')
+  @ApiOperation({
+    summary: 'Create a new WhatsApp diffusion group (broadcast list)',
+  })
+  @ApiBody({ type: CreateDiffusionGroupDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Diffusion group created successfully',
+    type: CreateDiffusionGroupResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid diffusion group data or participants',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'One or more participants not found on WhatsApp',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async createDiffusionGroup(@Body() body: CreateDiffusionGroupDto) {
+    const { name, participants, description } = body;
+    return this.whatsappService.createDiffusionGroup(
+      name,
+      participants,
+      description,
+    );
   }
 }

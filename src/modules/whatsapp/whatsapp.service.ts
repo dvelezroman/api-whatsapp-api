@@ -1310,4 +1310,147 @@ export class WhatsAppService implements OnModuleInit {
       throw new Error(`Failed to retrieve contacts: ${error.message}`);
     }
   }
+
+  async createGroup(
+    name: string,
+    participants: string[],
+    description?: string,
+  ) {
+    try {
+      // Check if client is ready before proceeding
+      await this.checkClientReady();
+
+      // Format participant phone numbers to WhatsApp format
+      const formattedParticipants = participants.map((phone) => {
+        const cleanPhone = phone.replace(/\D/g, '');
+        return `${cleanPhone}@c.us`;
+      });
+
+      this.logger.log(
+        `Creating group: ${name} with ${formattedParticipants.length} participants`,
+      );
+
+      // Create the group using WhatsApp Web.js
+      const groupResult = await this.client.createGroup(name, formattedParticipants);
+
+      // Handle the result - it can be a string (error) or CreateGroupResult object
+      if (typeof groupResult === 'string') {
+        throw new Error(`Failed to create group: ${groupResult}`);
+      }
+
+      const group = groupResult as any;
+
+      // Set description if provided
+      if (description) {
+        try {
+          await group.setDescription(description);
+        } catch (descError) {
+          this.logger.warn(
+            `Failed to set group description: ${descError.message}`,
+          );
+        }
+      }
+
+      this.logger.log(
+        `Group created successfully: ${group.name} (${group.id._serialized})`,
+      );
+
+      return {
+        status: 'success',
+        message: 'Group created successfully',
+        group: {
+          id: group.id._serialized,
+          name: group.name,
+          description: description || '',
+          participantsCount: formattedParticipants.length,
+          isGroup: true,
+          createdAt: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error creating group '${name}': ${error.message}`);
+
+      if (error.message.includes('CLIENT_NOT_READY')) {
+        throw new Error(`CLIENT_NOT_READY: ${error.message}`);
+      } else if (error.message.includes('not found')) {
+        throw new Error(
+          `PARTICIPANT_NOT_FOUND: One or more participants not found on WhatsApp`,
+        );
+      } else if (error.message.includes('permission')) {
+        throw new Error(
+          `PERMISSION_DENIED: You don't have permission to create groups`,
+        );
+      } else {
+        throw new Error(`GROUP_CREATION_ERROR: ${error.message}`);
+      }
+    }
+  }
+
+  async createDiffusionGroup(
+    name: string,
+    participants: string[],
+    description?: string,
+  ) {
+    try {
+      // Check if client is ready before proceeding
+      await this.checkClientReady();
+
+      // Format participant phone numbers to WhatsApp format
+      const formattedParticipants = participants.map((phone) => {
+        const cleanPhone = phone.replace(/\D/g, '');
+        return `${cleanPhone}@c.us`;
+      });
+
+      this.logger.log(
+        `Creating diffusion group: ${name} with ${formattedParticipants.length} participants`,
+      );
+
+      // Create the broadcast list using WhatsApp Web.js
+      // Note: WhatsApp Web.js uses createGroup for broadcast lists with specific parameters
+      const broadcastResult = await this.client.createGroup(name, formattedParticipants);
+
+      // Handle the result - it can be a string (error) or CreateGroupResult object
+      if (typeof broadcastResult === 'string') {
+        throw new Error(`Failed to create diffusion group: ${broadcastResult}`);
+      }
+
+      const broadcast = broadcastResult as any;
+
+      this.logger.log(
+        `Diffusion group created successfully: ${broadcast.name} (${broadcast.id._serialized})`,
+      );
+
+      return {
+        status: 'success',
+        message: 'Diffusion group created successfully',
+        diffusion: {
+          id: broadcast.id._serialized,
+          name: broadcast.name,
+          description: description || '',
+          participantsCount: formattedParticipants.length,
+          isGroup: true,
+          isBroadcast: true,
+          createdAt: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error creating diffusion group '${name}': ${error.message}`,
+      );
+
+      if (error.message.includes('CLIENT_NOT_READY')) {
+        throw new Error(`CLIENT_NOT_READY: ${error.message}`);
+      } else if (error.message.includes('not found')) {
+        throw new Error(
+          `PARTICIPANT_NOT_FOUND: One or more participants not found on WhatsApp`,
+        );
+      } else if (error.message.includes('permission')) {
+        throw new Error(
+          `PERMISSION_DENIED: You don't have permission to create broadcast lists`,
+        );
+      } else {
+        throw new Error(`DIFFUSION_CREATION_ERROR: ${error.message}`);
+      }
+    }
+  }
 }
