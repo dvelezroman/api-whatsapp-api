@@ -2,7 +2,9 @@ import { Controller, Post, Body, Get, Delete } from '@nestjs/common';
 import { WhatsAppService } from './whatsapp.service';
 import { ApiBody, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SendDto } from './dtos/send.dto';
+import { SendMessageResponseDto } from './dtos/send-message-response.dto';
 import { SaveContactDto } from './dtos/save-contact.dto';
+import { SaveContactResponseDto } from './dtos/save-contact-response.dto';
 import { GroupsResponseDto } from './dtos/group.dto';
 import { DiffusionGroupsResponseDto } from './dtos/diffusion-group.dto';
 import { SendGroupMessageDto } from './dtos/send-group-message.dto';
@@ -17,7 +19,9 @@ import {
   DiffusionContactsResponseDto,
   ContactResponseDto,
 } from './dtos/contact.dto';
+import { ContactsResponseDto } from './dtos/contacts-response.dto';
 import { WebhookConfigDto } from './dtos/webhook-config.dto';
+import { WebhookConfigResponseDto } from './dtos/webhook-config-response.dto';
 
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -65,7 +69,11 @@ export class WhatsAppController {
   @Post('send')
   @ApiOperation({ summary: 'Send a WhatsApp message' })
   @ApiBody({ type: SendDto })
-  @ApiResponse({ status: 201, description: 'Message sent successfully' })
+  @ApiResponse({
+    status: 201,
+    description: 'Message sent successfully',
+    type: SendMessageResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Bad request' })
   async sendMessage(@Body() body: SendDto) {
     const { phone, message } = body;
@@ -80,7 +88,11 @@ export class WhatsAppController {
       "Validates that a contact exists and was manually created in your phone's contact list. Does not create new contacts.",
   })
   @ApiBody({ type: SaveContactDto })
-  @ApiResponse({ status: 201, description: 'Contact validated successfully' })
+  @ApiResponse({
+    status: 201,
+    description: 'Contact validated successfully',
+    type: SaveContactResponseDto,
+  })
   @ApiResponse({
     status: 400,
     description: 'Bad request - Invalid phone number',
@@ -119,6 +131,18 @@ export class WhatsAppController {
   @ApiResponse({ status: 500, description: 'Internal server error' })
   async getAllDiffusionGroups() {
     return this.whatsappService.getAllDiffusionGroups();
+  }
+
+  @Get('contacts')
+  @ApiOperation({ summary: 'Get all WhatsApp contacts' })
+  @ApiResponse({
+    status: 200,
+    description: 'Contacts retrieved successfully',
+    type: ContactsResponseDto,
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async getAllContacts() {
+    return this.whatsappService.getAllContacts();
   }
 
   @Post('send-group')
@@ -234,7 +258,11 @@ export class WhatsAppController {
       'Sets up a webhook URL to forward messages from non-registered contacts to an external API',
   })
   @ApiBody({ type: WebhookConfigDto })
-  @ApiResponse({ status: 201, description: 'Webhook configured successfully' })
+  @ApiResponse({
+    status: 201,
+    description: 'Webhook configured successfully',
+    type: WebhookConfigResponseDto,
+  })
   @ApiResponse({
     status: 400,
     description: 'Bad request - Invalid webhook configuration',

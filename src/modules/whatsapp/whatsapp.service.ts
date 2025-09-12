@@ -541,14 +541,14 @@ export class WhatsAppService implements OnModuleInit {
         try {
           // Cast to any to access group-specific properties
           const groupChat = group as any;
-          
+
           // Safely handle createdAt timestamp with more robust validation
           let createdAt = null;
           if (groupChat.createdAt) {
             try {
               // Handle different timestamp formats
               let timestamp = groupChat.createdAt;
-              
+
               // If it's already in milliseconds (13 digits), use as is
               // If it's in seconds (10 digits), multiply by 1000
               if (typeof timestamp === 'number') {
@@ -563,18 +563,29 @@ export class WhatsAppService implements OnModuleInit {
               } else {
                 timestamp = null;
               }
-              
-              if (timestamp && timestamp > 0 && timestamp < Date.now() + 86400000) { // Valid timestamp (not in the far future)
+
+              if (
+                timestamp &&
+                timestamp > 0 &&
+                timestamp < Date.now() + 86400000
+              ) {
+                // Valid timestamp (not in the far future)
                 const date = new Date(timestamp);
-                if (!isNaN(date.getTime()) && date.getFullYear() > 1970 && date.getFullYear() < 2100) {
+                if (
+                  !isNaN(date.getTime()) &&
+                  date.getFullYear() > 1970 &&
+                  date.getFullYear() < 2100
+                ) {
                   createdAt = date.toISOString();
                 }
               }
             } catch (timestampError) {
-              this.logger.warn(`Invalid timestamp for group ${group.name}: ${groupChat.createdAt}`);
+              this.logger.warn(
+                `Invalid timestamp for group ${group.name}: ${groupChat.createdAt}`,
+              );
             }
           }
-          
+
           return {
             id: group.id._serialized,
             name: group.name,
@@ -584,7 +595,10 @@ export class WhatsAppService implements OnModuleInit {
             createdAt,
             participants:
               groupChat.participants?.map((participant: any) => ({
-                id: participant.id._serialized,
+                id:
+                  participant.id._serialized
+                    ?.replace('@c.us', '')
+                    .replace(/^/, '+') || 'unknown',
                 name: participant.name || participant.pushname || 'Unknown',
                 isAdmin: participant.isAdmin,
                 isSuperAdmin: participant.isSuperAdmin,
@@ -640,14 +654,14 @@ export class WhatsAppService implements OnModuleInit {
         try {
           // Cast to any to access group-specific properties
           const groupChat = group as any;
-          
+
           // Safely handle createdAt timestamp with more robust validation
           let createdAt = null;
           if (groupChat.createdAt) {
             try {
               // Handle different timestamp formats
               let timestamp = groupChat.createdAt;
-              
+
               // If it's already in milliseconds (13 digits), use as is
               // If it's in seconds (10 digits), multiply by 1000
               if (typeof timestamp === 'number') {
@@ -662,18 +676,29 @@ export class WhatsAppService implements OnModuleInit {
               } else {
                 timestamp = null;
               }
-              
-              if (timestamp && timestamp > 0 && timestamp < Date.now() + 86400000) { // Valid timestamp (not in the far future)
+
+              if (
+                timestamp &&
+                timestamp > 0 &&
+                timestamp < Date.now() + 86400000
+              ) {
+                // Valid timestamp (not in the far future)
                 const date = new Date(timestamp);
-                if (!isNaN(date.getTime()) && date.getFullYear() > 1970 && date.getFullYear() < 2100) {
+                if (
+                  !isNaN(date.getTime()) &&
+                  date.getFullYear() > 1970 &&
+                  date.getFullYear() < 2100
+                ) {
                   createdAt = date.toISOString();
                 }
               }
             } catch (timestampError) {
-              this.logger.warn(`Invalid timestamp for diffusion group ${group.name}: ${groupChat.createdAt}`);
+              this.logger.warn(
+                `Invalid timestamp for diffusion group ${group.name}: ${groupChat.createdAt}`,
+              );
             }
           }
-          
+
           return {
             id: group.id._serialized,
             name: group.name,
@@ -684,14 +709,19 @@ export class WhatsAppService implements OnModuleInit {
             createdAt,
             participants:
               groupChat.participants?.map((participant: any) => ({
-                id: participant.id._serialized,
+                id:
+                  participant.id._serialized
+                    ?.replace('@c.us', '')
+                    .replace(/^/, '+') || 'unknown',
                 name: participant.name || participant.pushname || 'Unknown',
                 isAdmin: participant.isAdmin,
                 isSuperAdmin: participant.isSuperAdmin,
               })) || [],
           };
         } catch (groupError) {
-          this.logger.warn(`Error processing diffusion group: ${groupError.message}`);
+          this.logger.warn(
+            `Error processing diffusion group: ${groupError.message}`,
+          );
           // Return a safe fallback for this group
           return {
             id: 'error',
@@ -921,9 +951,11 @@ export class WhatsAppService implements OnModuleInit {
 
       // Map participants to contact format
       const contacts = participants.map((participant: any) => ({
-        id: participant.id._serialized,
+        id:
+          participant.id._serialized?.replace('@c.us', '').replace(/^/, '+') ||
+          'unknown',
         name: participant.name || participant.pushname || 'Unknown',
-        phone: participant.id.user,
+        phone: participant.id.user ? `+${participant.id.user}` : 'unknown',
         pushname: participant.pushname,
         isBusiness: participant.isBusiness || false,
         isVerified: participant.isVerified || false,
@@ -1010,9 +1042,11 @@ export class WhatsAppService implements OnModuleInit {
 
       // Map participants to contact format
       const contacts = participants.map((participant: any) => ({
-        id: participant.id._serialized,
+        id:
+          participant.id._serialized?.replace('@c.us', '').replace(/^/, '+') ||
+          'unknown',
         name: participant.name || participant.pushname || 'Unknown',
-        phone: participant.id.user,
+        phone: participant.id.user ? `+${participant.id.user}` : 'unknown',
         pushname: participant.pushname,
         isBusiness: participant.isBusiness || false,
         isVerified: participant.isVerified || false,
@@ -1184,6 +1218,96 @@ export class WhatsAppService implements OnModuleInit {
       };
     } catch (error) {
       throw new Error(`Webhook test failed: ${error.message}`);
+    }
+  }
+
+  async getAllContacts() {
+    try {
+      // Check if client is ready before proceeding
+      await this.checkClientReady();
+
+      // Get all contacts from WhatsApp
+      const contacts = await this.client.getContacts();
+
+      // Map contacts to a more readable format
+      const formattedContacts = contacts.map((contact) => {
+        try {
+          // Safely handle contact data
+          const contactData = contact as any;
+
+          // Format phone number
+          let phone = 'unknown';
+          if (contactData.id && contactData.id.user) {
+            phone = `+${contactData.id.user}`;
+          }
+
+          // Handle last seen timestamp
+          let lastSeen = null;
+          if (contactData.lastSeen) {
+            try {
+              const timestamp = contactData.lastSeen;
+              let date;
+
+              // Handle different timestamp formats
+              if (typeof timestamp === 'number') {
+                if (timestamp.toString().length === 10) {
+                  date = new Date(timestamp * 1000);
+                } else if (timestamp.toString().length === 13) {
+                  date = new Date(timestamp);
+                }
+              }
+
+              if (
+                date &&
+                !isNaN(date.getTime()) &&
+                date.getFullYear() > 1970 &&
+                date.getFullYear() < 2100
+              ) {
+                lastSeen = date.toISOString();
+              }
+            } catch (timestampError) {
+              this.logger.warn(
+                `Invalid lastSeen timestamp for contact ${contactData.name}: ${contactData.lastSeen}`,
+              );
+            }
+          }
+
+          return {
+            id: contactData.id?._serialized || 'unknown',
+            name: contactData.name || contactData.pushname || 'Unknown',
+            pushname: contactData.pushname,
+            phone,
+            isBusiness: contactData.isBusiness || false,
+            isVerified: contactData.isVerified || false,
+            profilePicUrl: contactData.profilePicUrl,
+            status: contactData.status,
+            isOnline: contactData.isOnline,
+            lastSeen,
+          };
+        } catch (contactError) {
+          this.logger.warn(`Error processing contact: ${contactError.message}`);
+          // Return a safe fallback for this contact
+          return {
+            id: 'error',
+            name: 'Error Contact',
+            phone: 'unknown',
+            isBusiness: false,
+            isVerified: false,
+            isOnline: false,
+          };
+        }
+      });
+
+      this.logger.log(`Retrieved ${formattedContacts.length} contacts`);
+
+      return {
+        status: 'success',
+        totalContacts: formattedContacts.length,
+        contacts: formattedContacts,
+      };
+    } catch (error) {
+      this.logger.error(`Error retrieving contacts: ${error.message}`);
+      throw new Error(`Failed to retrieve contacts: ${error.message}`);
     }
   }
 }
