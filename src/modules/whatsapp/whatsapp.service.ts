@@ -538,28 +538,71 @@ export class WhatsAppService implements OnModuleInit {
 
       // Map groups to a more readable format
       const formattedGroups = groups.map((group) => {
-        // Cast to any to access group-specific properties
-        const groupChat = group as any;
-        return {
-          id: group.id._serialized,
-          name: group.name,
-          description: groupChat.description || '',
-          participantsCount: groupChat.participants?.length || 0,
-          isGroup: group.isGroup,
-          createdAt:
-            groupChat.createdAt &&
-            !isNaN(groupChat.createdAt) &&
-            groupChat.createdAt > 0
-              ? new Date(groupChat.createdAt * 1000).toISOString()
-              : null,
-          participants:
-            groupChat.participants?.map((participant: any) => ({
-              id: participant.id._serialized,
-              name: participant.name || participant.pushname || 'Unknown',
-              isAdmin: participant.isAdmin,
-              isSuperAdmin: participant.isSuperAdmin,
-            })) || [],
-        };
+        try {
+          // Cast to any to access group-specific properties
+          const groupChat = group as any;
+          
+          // Safely handle createdAt timestamp with more robust validation
+          let createdAt = null;
+          if (groupChat.createdAt) {
+            try {
+              // Handle different timestamp formats
+              let timestamp = groupChat.createdAt;
+              
+              // If it's already in milliseconds (13 digits), use as is
+              // If it's in seconds (10 digits), multiply by 1000
+              if (typeof timestamp === 'number') {
+                if (timestamp.toString().length === 10) {
+                  timestamp = timestamp * 1000;
+                } else if (timestamp.toString().length === 13) {
+                  // Already in milliseconds
+                } else {
+                  // Invalid timestamp length
+                  timestamp = null;
+                }
+              } else {
+                timestamp = null;
+              }
+              
+              if (timestamp && timestamp > 0 && timestamp < Date.now() + 86400000) { // Valid timestamp (not in the far future)
+                const date = new Date(timestamp);
+                if (!isNaN(date.getTime()) && date.getFullYear() > 1970 && date.getFullYear() < 2100) {
+                  createdAt = date.toISOString();
+                }
+              }
+            } catch (timestampError) {
+              this.logger.warn(`Invalid timestamp for group ${group.name}: ${groupChat.createdAt}`);
+            }
+          }
+          
+          return {
+            id: group.id._serialized,
+            name: group.name,
+            description: groupChat.description || '',
+            participantsCount: groupChat.participants?.length || 0,
+            isGroup: group.isGroup,
+            createdAt,
+            participants:
+              groupChat.participants?.map((participant: any) => ({
+                id: participant.id._serialized,
+                name: participant.name || participant.pushname || 'Unknown',
+                isAdmin: participant.isAdmin,
+                isSuperAdmin: participant.isSuperAdmin,
+              })) || [],
+          };
+        } catch (groupError) {
+          this.logger.warn(`Error processing group: ${groupError.message}`);
+          // Return a safe fallback for this group
+          return {
+            id: 'error',
+            name: 'Error Group',
+            description: 'Error processing this group',
+            participantsCount: 0,
+            isGroup: true,
+            createdAt: null,
+            participants: [],
+          };
+        }
       });
 
       this.logger.log(`Retrieved ${formattedGroups.length} groups`);
@@ -594,26 +637,73 @@ export class WhatsAppService implements OnModuleInit {
 
       // Map diffusion groups to a more readable format
       const formattedDiffusionGroups = diffusionGroups.map((group) => {
-        // Cast to any to access group-specific properties
-        const groupChat = group as any;
-        return {
-          id: group.id._serialized,
-          name: group.name,
-          description: groupChat.description || '',
-          participantsCount: groupChat.participants?.length || 0,
-          isGroup: group.isGroup,
-          isBroadcast: true,
-          createdAt: groupChat.createdAt
-            ? new Date(groupChat.createdAt * 1000).toISOString()
-            : null,
-          participants:
-            groupChat.participants?.map((participant: any) => ({
-              id: participant.id._serialized,
-              name: participant.name || participant.pushname || 'Unknown',
-              isAdmin: participant.isAdmin,
-              isSuperAdmin: participant.isSuperAdmin,
-            })) || [],
-        };
+        try {
+          // Cast to any to access group-specific properties
+          const groupChat = group as any;
+          
+          // Safely handle createdAt timestamp with more robust validation
+          let createdAt = null;
+          if (groupChat.createdAt) {
+            try {
+              // Handle different timestamp formats
+              let timestamp = groupChat.createdAt;
+              
+              // If it's already in milliseconds (13 digits), use as is
+              // If it's in seconds (10 digits), multiply by 1000
+              if (typeof timestamp === 'number') {
+                if (timestamp.toString().length === 10) {
+                  timestamp = timestamp * 1000;
+                } else if (timestamp.toString().length === 13) {
+                  // Already in milliseconds
+                } else {
+                  // Invalid timestamp length
+                  timestamp = null;
+                }
+              } else {
+                timestamp = null;
+              }
+              
+              if (timestamp && timestamp > 0 && timestamp < Date.now() + 86400000) { // Valid timestamp (not in the far future)
+                const date = new Date(timestamp);
+                if (!isNaN(date.getTime()) && date.getFullYear() > 1970 && date.getFullYear() < 2100) {
+                  createdAt = date.toISOString();
+                }
+              }
+            } catch (timestampError) {
+              this.logger.warn(`Invalid timestamp for diffusion group ${group.name}: ${groupChat.createdAt}`);
+            }
+          }
+          
+          return {
+            id: group.id._serialized,
+            name: group.name,
+            description: groupChat.description || '',
+            participantsCount: groupChat.participants?.length || 0,
+            isGroup: group.isGroup,
+            isBroadcast: true,
+            createdAt,
+            participants:
+              groupChat.participants?.map((participant: any) => ({
+                id: participant.id._serialized,
+                name: participant.name || participant.pushname || 'Unknown',
+                isAdmin: participant.isAdmin,
+                isSuperAdmin: participant.isSuperAdmin,
+              })) || [],
+          };
+        } catch (groupError) {
+          this.logger.warn(`Error processing diffusion group: ${groupError.message}`);
+          // Return a safe fallback for this group
+          return {
+            id: 'error',
+            name: 'Error Diffusion Group',
+            description: 'Error processing this diffusion group',
+            participantsCount: 0,
+            isGroup: true,
+            isBroadcast: true,
+            createdAt: null,
+            participants: [],
+          };
+        }
       });
 
       this.logger.log(
