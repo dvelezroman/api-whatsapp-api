@@ -6,6 +6,7 @@ import { SaveContactDto } from './dtos/save-contact.dto';
 import { GroupsResponseDto } from './dtos/group.dto';
 import { DiffusionGroupsResponseDto } from './dtos/diffusion-group.dto';
 import { SendGroupMessageDto } from './dtos/send-group-message.dto';
+import { SendGroupMessageResponseDto } from './dtos/send-group-message-response.dto';
 import { SendDiffusionMessageDto } from './dtos/send-diffusion-message.dto';
 import { GetGroupContactsDto } from './dtos/get-group-contacts.dto';
 import { GetDiffusionContactsDto } from './dtos/get-diffusion-contacts.dto';
@@ -125,6 +126,7 @@ export class WhatsAppController {
   @ApiResponse({
     status: 201,
     description: 'Message sent to group successfully',
+    type: SendGroupMessageResponseDto,
   })
   @ApiResponse({
     status: 400,

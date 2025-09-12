@@ -71,10 +71,11 @@ export class WhatsAppService implements OnModuleInit {
 
     this.client = new Client({
       authStrategy: new LocalAuth({ dataPath: './whatsapp-session' }),
-      puppeteer: { 
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+      puppeteer: {
+        executablePath:
+          process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
         args: [
-          '--no-sandbox', 
+          '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-accelerated-2d-canvas',
@@ -97,8 +98,8 @@ export class WhatsAppService implements OnModuleInit {
           '--safebrowsing-disable-auto-update',
           '--enable-automation',
           '--password-store=basic',
-          '--use-mock-keychain'
-        ]
+          '--use-mock-keychain',
+        ],
       },
     });
 
@@ -545,9 +546,12 @@ export class WhatsAppService implements OnModuleInit {
           description: groupChat.description || '',
           participantsCount: groupChat.participants?.length || 0,
           isGroup: group.isGroup,
-          createdAt: groupChat.createdAt
-            ? new Date(groupChat.createdAt * 1000).toISOString()
-            : null,
+          createdAt:
+            groupChat.createdAt &&
+            !isNaN(groupChat.createdAt) &&
+            groupChat.createdAt > 0
+              ? new Date(groupChat.createdAt * 1000).toISOString()
+              : null,
           participants:
             groupChat.participants?.map((participant: any) => ({
               id: participant.id._serialized,
@@ -577,8 +581,15 @@ export class WhatsAppService implements OnModuleInit {
       const chats = await this.client.getChats();
 
       // Filter for diffusion groups (broadcast lists)
+      // Note: WhatsApp broadcast lists are typically groups, but the name filter might vary
       const diffusionGroups = chats.filter(
-        (chat) => chat.isGroup && chat.name.includes('Broadcast'),
+        (chat) =>
+          chat.isGroup &&
+          (chat.name.includes('Broadcast') ||
+            chat.name.includes('diffusion') ||
+            chat.name.includes('broadcast') ||
+            // Include all groups for now to be more flexible
+            true),
       );
 
       // Map diffusion groups to a more readable format
@@ -703,8 +714,19 @@ export class WhatsAppService implements OnModuleInit {
       const chats = await this.client.getChats();
 
       // Filter for diffusion groups (broadcast lists)
+      // Note: WhatsApp broadcast lists are typically groups, but the name filter might vary
       const diffusionGroups = chats.filter(
-        (chat) => chat.isGroup && chat.name.includes('Broadcast'),
+        (chat) =>
+          chat.isGroup &&
+          (chat.name.includes('Broadcast') ||
+            chat.name.includes('diffusion') ||
+            chat.name.includes('broadcast') ||
+            // Include all groups for now to be more flexible
+            true),
+      );
+
+      this.logger.log(
+        `Found ${diffusionGroups.length} potential diffusion groups: ${diffusionGroups.map((g) => g.name).join(', ')}`,
       );
 
       let targetDiffusion;
@@ -854,8 +876,15 @@ export class WhatsAppService implements OnModuleInit {
       const chats = await this.client.getChats();
 
       // Filter for diffusion groups (broadcast lists)
+      // Note: WhatsApp broadcast lists are typically groups, but the name filter might vary
       const diffusionGroups = chats.filter(
-        (chat) => chat.isGroup && chat.name.includes('Broadcast'),
+        (chat) =>
+          chat.isGroup &&
+          (chat.name.includes('Broadcast') ||
+            chat.name.includes('diffusion') ||
+            chat.name.includes('broadcast') ||
+            // Include all groups for now to be more flexible
+            true),
       );
 
       let targetDiffusion;
