@@ -24,6 +24,12 @@ import { CreateGroupDto } from './dtos/create-group.dto';
 import { CreateGroupResponseDto } from './dtos/create-group-response.dto';
 import { CreateDiffusionGroupDto } from './dtos/create-diffusion-group.dto';
 import { CreateDiffusionGroupResponseDto } from './dtos/create-diffusion-group-response.dto';
+import { SendMediaMessageDto } from './dtos/send-media-message.dto';
+import { SendMediaMessageResponseDto } from './dtos/send-media-message-response.dto';
+import { SendGroupMediaMessageDto } from './dtos/send-group-media-message.dto';
+import { SendGroupMediaMessageResponseDto } from './dtos/send-group-media-message-response.dto';
+import { SendDiffusionMediaMessageDto } from './dtos/send-diffusion-media-message.dto';
+import { SendDiffusionMediaMessageResponseDto } from './dtos/send-diffusion-media-message-response.dto';
 import { WebhookConfigDto } from './dtos/webhook-config.dto';
 import { WebhookConfigResponseDto } from './dtos/webhook-config-response.dto';
 
@@ -382,6 +388,102 @@ export class WhatsAppController {
       name,
       participants,
       description,
+    );
+  }
+
+  @Post('send-media')
+  @ApiOperation({ summary: 'Send a media message to a WhatsApp contact' })
+  @ApiBody({ type: SendMediaMessageDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Media message sent successfully',
+    type: SendMediaMessageResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid media data or contact',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Contact not found',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async sendMediaMessage(@Body() body: SendMediaMessageDto) {
+    const { phone, mediaType, mediaUrl, caption, filename } = body;
+    return this.whatsappService.sendMediaMessage(
+      phone,
+      mediaType,
+      mediaUrl,
+      caption,
+      filename,
+    );
+  }
+
+  @Post('send-group-media')
+  @ApiOperation({ summary: 'Send a media message to a WhatsApp group' })
+  @ApiBody({ type: SendGroupMediaMessageDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Media message sent to group successfully',
+    type: SendGroupMediaMessageResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid media data or group',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Group not found',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async sendGroupMediaMessage(@Body() body: SendGroupMediaMessageDto) {
+    const { groupName, mediaType, mediaUrl, caption, filename, searchById } =
+      body;
+    return this.whatsappService.sendMediaMessageToGroup(
+      groupName,
+      mediaType,
+      mediaUrl,
+      caption,
+      filename,
+      searchById,
+    );
+  }
+
+  @Post('send-diffusion-media')
+  @ApiOperation({
+    summary: 'Send a media message to a WhatsApp diffusion group',
+  })
+  @ApiBody({ type: SendDiffusionMediaMessageDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Media message sent to diffusion group successfully',
+    type: SendDiffusionMediaMessageResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid media data or diffusion group',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Diffusion group not found',
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async sendDiffusionMediaMessage(@Body() body: SendDiffusionMediaMessageDto) {
+    const {
+      diffusionName,
+      mediaType,
+      mediaUrl,
+      caption,
+      filename,
+      searchById,
+    } = body;
+    return this.whatsappService.sendMediaMessageToDiffusion(
+      diffusionName,
+      mediaType,
+      mediaUrl,
+      caption,
+      filename,
+      searchById,
     );
   }
 }

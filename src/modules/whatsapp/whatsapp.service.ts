@@ -1331,7 +1331,10 @@ export class WhatsAppService implements OnModuleInit {
       );
 
       // Create the group using WhatsApp Web.js
-      const groupResult = await this.client.createGroup(name, formattedParticipants);
+      const groupResult = await this.client.createGroup(
+        name,
+        formattedParticipants,
+      );
 
       this.logger.log(`Group creation result type: ${typeof groupResult}`);
       this.logger.log(`Group creation result: ${JSON.stringify(groupResult)}`);
@@ -1366,7 +1369,9 @@ export class WhatsAppService implements OnModuleInit {
       }
 
       if (!groupId) {
-        this.logger.error(`Group created but no valid ID found: ${JSON.stringify(group)}`);
+        this.logger.error(
+          `Group created but no valid ID found: ${JSON.stringify(group)}`,
+        );
         throw new Error('Group creation failed: No valid group ID returned');
       }
 
@@ -1381,9 +1386,7 @@ export class WhatsAppService implements OnModuleInit {
         }
       }
 
-      this.logger.log(
-        `Group created successfully: ${groupName} (${groupId})`,
-      );
+      this.logger.log(`Group created successfully: ${groupName} (${groupId})`);
 
       return {
         status: 'success',
@@ -1438,10 +1441,17 @@ export class WhatsAppService implements OnModuleInit {
       // Create the broadcast list using WhatsApp Web.js
       // For broadcast lists, we need to use a different approach
       // First, let's try to create a regular group and then convert it to broadcast if needed
-      const broadcastResult = await this.client.createGroup(name, formattedParticipants);
+      const broadcastResult = await this.client.createGroup(
+        name,
+        formattedParticipants,
+      );
 
-      this.logger.log(`Diffusion group creation result type: ${typeof broadcastResult}`);
-      this.logger.log(`Diffusion group creation result: ${JSON.stringify(broadcastResult)}`);
+      this.logger.log(
+        `Diffusion group creation result type: ${typeof broadcastResult}`,
+      );
+      this.logger.log(
+        `Diffusion group creation result: ${JSON.stringify(broadcastResult)}`,
+      );
 
       // Handle the result - it can be a string (error) or CreateGroupResult object
       if (typeof broadcastResult === 'string') {
@@ -1452,8 +1462,12 @@ export class WhatsAppService implements OnModuleInit {
 
       // Validate that the broadcast object has the required properties
       if (!broadcast) {
-        this.logger.error(`Invalid broadcast result: ${JSON.stringify(broadcast)}`);
-        throw new Error('Diffusion group creation failed: No broadcast object returned');
+        this.logger.error(
+          `Invalid broadcast result: ${JSON.stringify(broadcast)}`,
+        );
+        throw new Error(
+          'Diffusion group creation failed: No broadcast object returned',
+        );
       }
 
       // Check if the broadcast has an id property and handle different possible structures
@@ -1473,8 +1487,12 @@ export class WhatsAppService implements OnModuleInit {
       }
 
       if (!broadcastId) {
-        this.logger.error(`Broadcast created but no valid ID found: ${JSON.stringify(broadcast)}`);
-        throw new Error('Diffusion group creation failed: No valid broadcast ID returned');
+        this.logger.error(
+          `Broadcast created but no valid ID found: ${JSON.stringify(broadcast)}`,
+        );
+        throw new Error(
+          'Diffusion group creation failed: No valid broadcast ID returned',
+        );
       }
 
       this.logger.log(
@@ -1511,6 +1529,415 @@ export class WhatsAppService implements OnModuleInit {
         );
       } else {
         throw new Error(`DIFFUSION_CREATION_ERROR: ${error.message}`);
+      }
+    }
+  }
+
+  async sendMediaMessage(
+    phone: string,
+    mediaType: string,
+    mediaUrl: string,
+    caption?: string,
+    filename?: string,
+  ) {
+    try {
+      return await this.retryOperation(async () => {
+        // Check if client is ready before proceeding
+        await this.checkClientReady();
+
+        // Format phone number to WhatsApp format
+        const formattedPhone = phone.includes('@c.us')
+          ? phone
+          : phone.replace(/\D/g, '') + '@c.us';
+
+        // Validate if contact exists and was manually created
+        const contact = await this.client.getContactById(formattedPhone);
+        const contactName = contact.name || contact.pushname;
+        if (!contactName) {
+          throw new Error(
+            `Contact with phone ${formattedPhone} exists but was not manually created. Please add this contact to your phone's contact list first.`,
+          );
+        }
+
+        // Send media message based on type
+        let message;
+        const mediaOptions: any = {};
+
+        if (caption) {
+          mediaOptions.caption = caption;
+        }
+
+        if (filename && mediaType === 'document') {
+          mediaOptions.filename = filename;
+        }
+
+        switch (mediaType.toLowerCase()) {
+          case 'image':
+            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+              ...mediaOptions,
+            });
+            break;
+          case 'document':
+            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+              ...mediaOptions,
+            });
+            break;
+          case 'audio':
+            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+              ...mediaOptions,
+            });
+            break;
+          case 'video':
+            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+              ...mediaOptions,
+            });
+            break;
+          case 'sticker':
+            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+              ...mediaOptions,
+            });
+            break;
+          default:
+            throw new Error(`Unsupported media type: ${mediaType}`);
+        }
+
+        this.logger.log(
+          `Media message sent to ${contactName} (${formattedPhone})`,
+        );
+
+        return {
+          status: 'success',
+          phone: formattedPhone,
+          contactName,
+          media: {
+            type: mediaType,
+            url: mediaUrl,
+            caption,
+            filename,
+          },
+          sentAt: new Date().toISOString(),
+        };
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error sending media message to ${phone}: ${error.message}`,
+      );
+
+      if (
+        error.message.includes('CLIENT_NOT_INITIALIZED') ||
+        error.message.includes('CLIENT_NOT_AUTHENTICATED') ||
+        error.message.includes('CLIENT_NOT_READY') ||
+        error.message.includes('WEB_HELPERS_NOT_INJECTED')
+      ) {
+        throw new Error(error.message);
+      } else if (error.message.includes('not found')) {
+        throw new Error(
+          `CONTACT_NOT_FOUND: Contact with phone ${phone} not found. Please add this contact to your phone's contact list first.`,
+        );
+      } else if (error.message.includes('not manually created')) {
+        throw new Error(
+          `CONTACT_NOT_MANUAL: Contact with phone ${phone} exists but was not manually created. Please add this contact to your phone's contact list first.`,
+        );
+      } else if (error.message.includes('Unsupported media type')) {
+        throw new Error(`MEDIA_TYPE_ERROR: ${error.message}`);
+      } else {
+        throw new Error(`MEDIA_SEND_ERROR: ${error.message}`);
+      }
+    }
+  }
+
+  async sendMediaMessageToGroup(
+    groupName: string,
+    mediaType: string,
+    mediaUrl: string,
+    caption?: string,
+    filename?: string,
+    searchById: boolean = false,
+  ) {
+    try {
+      // Check if client is ready before proceeding
+      await this.checkClientReady();
+
+      // Get all chats from WhatsApp
+      const chats = await this.client.getChats();
+      const groups = chats.filter((chat) => chat.isGroup);
+
+      let targetGroup;
+
+      if (searchById) {
+        // Search by group ID
+        targetGroup = groups.find(
+          (group) => group.id._serialized === groupName,
+        );
+        if (!targetGroup) {
+          throw new Error(
+            `Group with ID '${groupName}' not found. Available groups: ${groups.map((g) => g.id._serialized).join(', ')}`,
+          );
+        }
+      } else {
+        // Search by group name (case-insensitive)
+        targetGroup = groups.find((group) =>
+          group.name.toLowerCase().includes(groupName.toLowerCase()),
+        );
+
+        if (!targetGroup) {
+          const availableGroups = groups.map((g) => g.name).join(', ');
+          throw new Error(
+            `Group with name containing '${groupName}' not found. Available groups: ${availableGroups}`,
+          );
+        }
+      }
+
+      // Send media message to the group
+      const mediaOptions: any = {};
+
+      if (caption) {
+        mediaOptions.caption = caption;
+      }
+
+      if (filename && mediaType === 'document') {
+        mediaOptions.filename = filename;
+      }
+
+      let message;
+      switch (mediaType.toLowerCase()) {
+        case 'image':
+          message = await this.client.sendMessage(
+            targetGroup.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        case 'document':
+          message = await this.client.sendMessage(
+            targetGroup.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        case 'audio':
+          message = await this.client.sendMessage(
+            targetGroup.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        case 'video':
+          message = await this.client.sendMessage(
+            targetGroup.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        case 'sticker':
+          message = await this.client.sendMessage(
+            targetGroup.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        default:
+          throw new Error(`Unsupported media type: ${mediaType}`);
+      }
+
+      this.logger.log(
+        `Media message sent to group: ${targetGroup.name} (${targetGroup.id._serialized})`,
+      );
+
+      return {
+        status: 'success',
+        group: {
+          id: targetGroup.id._serialized,
+          name: targetGroup.name,
+          participantsCount: (targetGroup as any).participants?.length || 0,
+        },
+        media: {
+          type: mediaType,
+          url: mediaUrl,
+          caption,
+          filename,
+        },
+        sentAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error sending media message to group '${groupName}': ${error.message}`,
+      );
+
+      if (error.message.includes('not found')) {
+        throw new Error(`GROUP_NOT_FOUND: ${error.message}`);
+      } else if (error.message.includes('Failed to send')) {
+        throw new Error(
+          `SEND_FAILED: Failed to send media message to group. Please check if you have permission to send messages in this group.`,
+        );
+      } else if (error.message.includes('Unsupported media type')) {
+        throw new Error(`MEDIA_TYPE_ERROR: ${error.message}`);
+      } else {
+        throw new Error(`GROUP_MEDIA_SEND_ERROR: ${error.message}`);
+      }
+    }
+  }
+
+  async sendMediaMessageToDiffusion(
+    diffusionName: string,
+    mediaType: string,
+    mediaUrl: string,
+    caption?: string,
+    filename?: string,
+    searchById: boolean = false,
+  ) {
+    try {
+      // Check if client is ready before proceeding
+      await this.checkClientReady();
+
+      // Get all chats from WhatsApp
+      const chats = await this.client.getChats();
+
+      // Filter for diffusion groups (broadcast lists)
+      const diffusionGroups = chats.filter(
+        (chat) =>
+          chat.isGroup &&
+          (chat.name.includes('Broadcast') ||
+            chat.name.includes('diffusion') ||
+            chat.name.includes('broadcast') ||
+            // Include all groups for now to be more flexible
+            true),
+      );
+
+      let targetDiffusion;
+
+      if (searchById) {
+        // Search by diffusion ID
+        targetDiffusion = diffusionGroups.find(
+          (group) => group.id._serialized === diffusionName,
+        );
+        if (!targetDiffusion) {
+          throw new Error(
+            `Diffusion group with ID '${diffusionName}' not found. Available diffusion groups: ${diffusionGroups.map((g) => g.id._serialized).join(', ')}`,
+          );
+        }
+      } else {
+        // Search by diffusion name (case-insensitive)
+        targetDiffusion = diffusionGroups.find((group) =>
+          group.name.toLowerCase().includes(diffusionName.toLowerCase()),
+        );
+
+        if (!targetDiffusion) {
+          const availableDiffusions = diffusionGroups
+            .map((g) => g.name)
+            .join(', ');
+          throw new Error(
+            `Diffusion group with name containing '${diffusionName}' not found. Available diffusion groups: ${availableDiffusions}`,
+          );
+        }
+      }
+
+      // Send media message to the diffusion group
+      const mediaOptions: any = {};
+
+      if (caption) {
+        mediaOptions.caption = caption;
+      }
+
+      if (filename && mediaType === 'document') {
+        mediaOptions.filename = filename;
+      }
+
+      let message;
+      switch (mediaType.toLowerCase()) {
+        case 'image':
+          message = await this.client.sendMessage(
+            targetDiffusion.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        case 'document':
+          message = await this.client.sendMessage(
+            targetDiffusion.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        case 'audio':
+          message = await this.client.sendMessage(
+            targetDiffusion.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        case 'video':
+          message = await this.client.sendMessage(
+            targetDiffusion.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        case 'sticker':
+          message = await this.client.sendMessage(
+            targetDiffusion.id._serialized,
+            mediaUrl,
+            {
+              ...mediaOptions,
+            },
+          );
+          break;
+        default:
+          throw new Error(`Unsupported media type: ${mediaType}`);
+      }
+
+      this.logger.log(
+        `Media message sent to diffusion group: ${targetDiffusion.name} (${targetDiffusion.id._serialized})`,
+      );
+
+      return {
+        status: 'success',
+        diffusion: {
+          id: targetDiffusion.id._serialized,
+          name: targetDiffusion.name,
+          participantsCount: (targetDiffusion as any).participants?.length || 0,
+        },
+        media: {
+          type: mediaType,
+          url: mediaUrl,
+          caption,
+          filename,
+        },
+        sentAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error sending media message to diffusion group '${diffusionName}': ${error.message}`,
+      );
+
+      if (error.message.includes('not found')) {
+        throw new Error(`DIFFUSION_NOT_FOUND: ${error.message}`);
+      } else if (error.message.includes('Failed to send')) {
+        throw new Error(
+          `SEND_FAILED: Failed to send media message to diffusion group. Please check if you have permission to send messages in this diffusion group.`,
+        );
+      } else if (error.message.includes('Unsupported media type')) {
+        throw new Error(`MEDIA_TYPE_ERROR: ${error.message}`);
+      } else {
+        throw new Error(`DIFFUSION_MEDIA_SEND_ERROR: ${error.message}`);
       }
     }
   }
