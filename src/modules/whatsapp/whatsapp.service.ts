@@ -1331,7 +1331,10 @@ export class WhatsAppService implements OnModuleInit {
       );
 
       // Create the group using WhatsApp Web.js
-      const groupResult = await this.client.createGroup(name, formattedParticipants);
+      const groupResult = await this.client.createGroup(
+        name,
+        formattedParticipants,
+      );
 
       this.logger.log(`Group creation result type: ${typeof groupResult}`);
       this.logger.log(`Group creation result: ${JSON.stringify(groupResult)}`);
@@ -1366,7 +1369,9 @@ export class WhatsAppService implements OnModuleInit {
       }
 
       if (!groupId) {
-        this.logger.error(`Group created but no valid ID found: ${JSON.stringify(group)}`);
+        this.logger.error(
+          `Group created but no valid ID found: ${JSON.stringify(group)}`,
+        );
         throw new Error('Group creation failed: No valid group ID returned');
       }
 
@@ -1381,9 +1386,7 @@ export class WhatsAppService implements OnModuleInit {
         }
       }
 
-      this.logger.log(
-        `Group created successfully: ${groupName} (${groupId})`,
-      );
+      this.logger.log(`Group created successfully: ${groupName} (${groupId})`);
 
       return {
         status: 'success',
@@ -1438,10 +1441,17 @@ export class WhatsAppService implements OnModuleInit {
       // Create the broadcast list using WhatsApp Web.js
       // For broadcast lists, we need to use a different approach
       // First, let's try to create a regular group and then convert it to broadcast if needed
-      const broadcastResult = await this.client.createGroup(name, formattedParticipants);
+      const broadcastResult = await this.client.createGroup(
+        name,
+        formattedParticipants,
+      );
 
-      this.logger.log(`Diffusion group creation result type: ${typeof broadcastResult}`);
-      this.logger.log(`Diffusion group creation result: ${JSON.stringify(broadcastResult)}`);
+      this.logger.log(
+        `Diffusion group creation result type: ${typeof broadcastResult}`,
+      );
+      this.logger.log(
+        `Diffusion group creation result: ${JSON.stringify(broadcastResult)}`,
+      );
 
       // Handle the result - it can be a string (error) or CreateGroupResult object
       if (typeof broadcastResult === 'string') {
@@ -1452,8 +1462,12 @@ export class WhatsAppService implements OnModuleInit {
 
       // Validate that the broadcast object has the required properties
       if (!broadcast) {
-        this.logger.error(`Invalid broadcast result: ${JSON.stringify(broadcast)}`);
-        throw new Error('Diffusion group creation failed: No broadcast object returned');
+        this.logger.error(
+          `Invalid broadcast result: ${JSON.stringify(broadcast)}`,
+        );
+        throw new Error(
+          'Diffusion group creation failed: No broadcast object returned',
+        );
       }
 
       // Check if the broadcast has an id property and handle different possible structures
@@ -1473,8 +1487,12 @@ export class WhatsAppService implements OnModuleInit {
       }
 
       if (!broadcastId) {
-        this.logger.error(`Broadcast created but no valid ID found: ${JSON.stringify(broadcast)}`);
-        throw new Error('Diffusion group creation failed: No valid broadcast ID returned');
+        this.logger.error(
+          `Broadcast created but no valid ID found: ${JSON.stringify(broadcast)}`,
+        );
+        throw new Error(
+          'Diffusion group creation failed: No valid broadcast ID returned',
+        );
       }
 
       this.logger.log(
