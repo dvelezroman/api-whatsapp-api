@@ -24,23 +24,6 @@ export class WhatsAppService implements OnModuleInit {
 
   constructor(private configService: ConfigService) {}
 
-  private getMimeTypeFromMediaType(mediaType: string): string {
-    switch (mediaType.toLowerCase()) {
-      case 'image':
-        return 'image/jpeg'; // Default to JPEG for images
-      case 'video':
-        return 'video/mp4'; // Default to MP4 for videos
-      case 'audio':
-        return 'audio/mpeg'; // Default to MP3 for audio
-      case 'document':
-        return 'application/pdf'; // Default to PDF for documents
-      case 'sticker':
-        return 'image/webp'; // Default to WebP for stickers
-      default:
-        return 'application/octet-stream'; // Generic binary
-    }
-  }
-
   private async testWebHelpers(): Promise<boolean> {
     try {
       // Try to get a simple chat to test if helpers are working
@@ -1578,88 +1561,17 @@ export class WhatsAppService implements OnModuleInit {
           mediaOptions.filename = filename;
         }
 
-        // Create MessageMedia object for proper image display
-        let media: MessageMedia;
-
-        // Check if input is base64 data or URL
-        const isBase64 =
-          mediaUrl.startsWith('data:') ||
-          (!mediaUrl.startsWith('http') && mediaUrl.length > 100);
-
-        if (isBase64) {
-          this.logger.log(`Processing base64 media data`);
-          try {
-            // Handle base64 data
-            if (mediaUrl.startsWith('data:')) {
-              // Data URL format: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ...
-              const [mimeType, base64Data] = mediaUrl.split(',');
-              const mime = mimeType.split(':')[1].split(';')[0];
-              media = new MessageMedia(mime, base64Data);
-            } else {
-              // Raw base64 data
-              const mimeType = this.getMimeTypeFromMediaType(mediaType);
-              media = new MessageMedia(mimeType, mediaUrl);
-            }
-          } catch (base64Error) {
-            this.logger.warn(
-              `Failed to process base64 data: ${base64Error.message}`,
-            );
-            // Fallback: send as text message
-            await this.client.sendMessage(
-              formattedPhone,
-              `${mediaType.toUpperCase()}: [Base64 data]${caption ? `\n\n${caption}` : ''}`,
-            );
-            return {
-              status: 'success',
-              phone: formattedPhone,
-              contactName,
-              media: {
-                type: mediaType,
-                url: '[Base64 data]',
-                caption,
-                filename,
-              },
-              sentAt: new Date().toISOString(),
-              note: 'Media sent as text due to base64 processing failure',
-            };
-          }
-        } else {
-          // Handle URL
-          this.logger.log(`Downloading media from URL: ${mediaUrl}`);
-          try {
-            media = (await Promise.race([
-              MessageMedia.fromUrl(mediaUrl),
-              new Promise((_, reject) =>
-                setTimeout(
-                  () => reject(new Error('Media download timeout')),
-                  30000,
-                ),
-              ),
-            ])) as MessageMedia;
-          } catch (downloadError) {
-            this.logger.warn(
-              `Failed to download media from URL: ${mediaUrl}. Error: ${downloadError.message}`,
-            );
-            // Fallback: send URL as text message
-            await this.client.sendMessage(
-              formattedPhone,
-              `${mediaType.toUpperCase()}: ${mediaUrl}${caption ? `\n\n${caption}` : ''}`,
-            );
-            return {
-              status: 'success',
-              phone: formattedPhone,
-              contactName,
-              media: {
-                type: mediaType,
-                url: mediaUrl,
-                caption,
-                filename,
-              },
-              sentAt: new Date().toISOString(),
-              note: 'Media sent as URL due to download failure',
-            };
-          }
-        }
+        // Create MessageMedia object for proper image display with timeout
+        this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+        const media = (await Promise.race([
+          MessageMedia.fromUrl(mediaUrl),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('Media download timeout')),
+              30000,
+            ),
+          ),
+        ])) as MessageMedia;
 
         switch (mediaType.toLowerCase()) {
           case 'image':
@@ -1789,94 +1701,14 @@ export class WhatsAppService implements OnModuleInit {
         mediaOptions.filename = filename;
       }
 
-      // Create MessageMedia object for proper image display
-      let media: MessageMedia;
-
-      // Check if input is base64 data or URL
-      const isBase64 =
-        mediaUrl.startsWith('data:') ||
-        (!mediaUrl.startsWith('http') && mediaUrl.length > 100);
-
-      if (isBase64) {
-        this.logger.log(`Processing base64 media data`);
-        try {
-          // Handle base64 data
-          if (mediaUrl.startsWith('data:')) {
-            // Data URL format: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ...
-            const [mimeType, base64Data] = mediaUrl.split(',');
-            const mime = mimeType.split(':')[1].split(';')[0];
-            media = new MessageMedia(mime, base64Data);
-          } else {
-            // Raw base64 data
-            const mimeType = this.getMimeTypeFromMediaType(mediaType);
-            media = new MessageMedia(mimeType, mediaUrl);
-          }
-        } catch (base64Error) {
-          this.logger.warn(
-            `Failed to process base64 data: ${base64Error.message}`,
-          );
-          // Fallback: send as text message
-          await this.client.sendMessage(
-            targetGroup.id._serialized,
-            `${mediaType.toUpperCase()}: [Base64 data]${caption ? `\n\n${caption}` : ''}`,
-          );
-          return {
-            status: 'success',
-            group: {
-              id: targetGroup.id._serialized,
-              name: targetGroup.name,
-              participantsCount: (targetGroup as any).participants?.length || 0,
-            },
-            media: {
-              type: mediaType,
-              url: '[Base64 data]',
-              caption,
-              filename,
-            },
-            sentAt: new Date().toISOString(),
-            note: 'Media sent as text due to base64 processing failure',
-          };
-        }
-      } else {
-        // Handle URL
-        this.logger.log(`Downloading media from URL: ${mediaUrl}`);
-        try {
-          media = (await Promise.race([
-            MessageMedia.fromUrl(mediaUrl),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error('Media download timeout')),
-                30000,
-              ),
-            ),
-          ])) as MessageMedia;
-        } catch (downloadError) {
-          this.logger.warn(
-            `Failed to download media from URL: ${mediaUrl}. Error: ${downloadError.message}`,
-          );
-          // Fallback: send URL as text message
-          await this.client.sendMessage(
-            targetGroup.id._serialized,
-            `${mediaType.toUpperCase()}: ${mediaUrl}${caption ? `\n\n${caption}` : ''}`,
-          );
-          return {
-            status: 'success',
-            group: {
-              id: targetGroup.id._serialized,
-              name: targetGroup.name,
-              participantsCount: (targetGroup as any).participants?.length || 0,
-            },
-            media: {
-              type: mediaType,
-              url: mediaUrl,
-              caption,
-              filename,
-            },
-            sentAt: new Date().toISOString(),
-            note: 'Media sent as URL due to download failure',
-          };
-        }
-      }
+      // Create MessageMedia object for proper image display with timeout
+      this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+      const media = (await Promise.race([
+        MessageMedia.fromUrl(mediaUrl),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Media download timeout')), 30000),
+        ),
+      ])) as MessageMedia;
 
       switch (mediaType.toLowerCase()) {
         case 'image':
@@ -2015,95 +1847,14 @@ export class WhatsAppService implements OnModuleInit {
         mediaOptions.filename = filename;
       }
 
-      // Create MessageMedia object for proper image display
-      let media: MessageMedia;
-
-      // Check if input is base64 data or URL
-      const isBase64 =
-        mediaUrl.startsWith('data:') ||
-        (!mediaUrl.startsWith('http') && mediaUrl.length > 100);
-
-      if (isBase64) {
-        this.logger.log(`Processing base64 media data`);
-        try {
-          // Handle base64 data
-          if (mediaUrl.startsWith('data:')) {
-            // Data URL format: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ...
-            const [mimeType, base64Data] = mediaUrl.split(',');
-            const mime = mimeType.split(':')[1].split(';')[0];
-            media = new MessageMedia(mime, base64Data);
-          } else {
-            // Raw base64 data
-            const mimeType = this.getMimeTypeFromMediaType(mediaType);
-            media = new MessageMedia(mimeType, mediaUrl);
-          }
-        } catch (base64Error) {
-          this.logger.warn(
-            `Failed to process base64 data: ${base64Error.message}`,
-          );
-          // Fallback: send as text message
-          await this.client.sendMessage(
-            targetDiffusion.id._serialized,
-            `${mediaType.toUpperCase()}: [Base64 data]${caption ? `\n\n${caption}` : ''}`,
-          );
-          return {
-            status: 'success',
-            group: {
-              id: targetDiffusion.id._serialized,
-              name: targetDiffusion.name,
-              participantsCount:
-                (targetDiffusion as any).participants?.length || 0,
-            },
-            media: {
-              type: mediaType,
-              url: '[Base64 data]',
-              caption,
-              filename,
-            },
-            sentAt: new Date().toISOString(),
-            note: 'Media sent as text due to base64 processing failure',
-          };
-        }
-      } else {
-        // Handle URL
-        this.logger.log(`Downloading media from URL: ${mediaUrl}`);
-        try {
-          media = (await Promise.race([
-            MessageMedia.fromUrl(mediaUrl),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error('Media download timeout')),
-                30000,
-              ),
-            ),
-          ])) as MessageMedia;
-        } catch (downloadError) {
-          this.logger.warn(
-            `Failed to download media from URL: ${mediaUrl}. Error: ${downloadError.message}`,
-          );
-          // Fallback: send URL as text message
-          await this.client.sendMessage(
-            targetDiffusion.id._serialized,
-            `${mediaType.toUpperCase()}: ${mediaUrl}${caption ? `\n\n${caption}` : ''}`,
-          );
-          return {
-            status: 'success',
-            group: {
-              id: targetDiffusion.id._serialized,
-              name: targetDiffusion.name,
-              participantsCount: targetDiffusion.participants?.length || 0,
-            },
-            media: {
-              type: mediaType,
-              url: mediaUrl,
-              caption,
-              filename,
-            },
-            sentAt: new Date().toISOString(),
-            note: 'Media sent as URL due to download failure',
-          };
-        }
-      }
+      // Download media from URL
+      this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+      const media = (await Promise.race([
+        MessageMedia.fromUrl(mediaUrl),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Media download timeout')), 30000),
+        ),
+      ])) as MessageMedia;
 
       switch (mediaType.toLowerCase()) {
         case 'image':
