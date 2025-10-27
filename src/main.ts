@@ -5,12 +5,38 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Enable CORS for Swagger UI and API requests
+  app.enableCors({
+    origin: true, // Allow all origins in development
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    credentials: true,
+  });
+
   // Swagger configuration
   const config = new DocumentBuilder()
     .setTitle('WhatsApp API')
-    .setDescription('API for sending WhatsApp messages using whatsapp-web.js')
-    .setVersion('1.0')
-    .addTag('whatsapp')
+    .setDescription(
+      `
+      A comprehensive API for managing WhatsApp messaging using whatsapp-web.js.
+      
+      ## Features
+      - Send messages to individual contacts
+      - Send messages to groups and broadcast lists
+      - Manage contacts and groups
+      - Webhook integration for incoming messages
+      - QR code authentication
+      
+      ## Authentication
+      This API uses WhatsApp Web authentication. You need to scan a QR code to connect your WhatsApp account.
+      
+      ## Webhook Integration
+      Configure webhooks to receive and process incoming messages from unknown contacts automatically.
+    `,
+    )
+    .setVersion('1.0.0')
+    .addTag('WhatsApp', 'Core WhatsApp messaging functionality')
+    .addTag('Qr', 'QR code authentication endpoints')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

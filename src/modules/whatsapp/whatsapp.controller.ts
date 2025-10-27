@@ -1,6 +1,13 @@
 import { Controller, Post, Body, Get, Delete } from '@nestjs/common';
 import { WhatsAppService } from './whatsapp.service';
-import { ApiBody, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+  ApiConsumes,
+  ApiProduces,
+} from '@nestjs/swagger';
 import { SendDto } from './dtos/send.dto';
 import { SendMessageResponseDto } from './dtos/send-message-response.dto';
 import { SaveContactDto } from './dtos/save-contact.dto';
@@ -33,40 +40,151 @@ import { SendDiffusionMediaMessageResponseDto } from './dtos/send-diffusion-medi
 import { WebhookConfigDto } from './dtos/webhook-config.dto';
 import { WebhookConfigResponseDto } from './dtos/webhook-config-response.dto';
 
+@ApiTags('WhatsApp')
 @Controller('whatsapp')
 export class WhatsAppController {
   constructor(private readonly whatsappService: WhatsAppService) {}
 
   @Get('qrcode')
-  @ApiOperation({ summary: 'Get QR Code for WhatsApp Web login' })
+  @ApiOperation({
+    summary: 'Get QR Code for WhatsApp Web login',
+    description:
+      'Retrieves the QR code for WhatsApp Web authentication. Scan this QR code with your phone to connect WhatsApp Web.',
+  })
   @ApiResponse({
     status: 200,
-    description: 'Returns QR code image as Base64 or URL.',
+    description: 'Returns QR code image as Base64 or status message.',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['qr', 'no_qr'],
+          description: 'Status of the QR code',
+        },
+        qr: {
+          type: 'string',
+          description:
+            'Base64 encoded QR code image (only present when status is "qr")',
+          example: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...',
+        },
+        message: {
+          type: 'string',
+          description: 'Status message (only present when status is "no_qr")',
+          example: 'No QR code available at this moment',
+        },
+      },
+    },
   })
+  @ApiProduces('application/json')
   async getQRCode() {
     return this.whatsappService.getQRCode();
   }
 
   @Get('status')
-  @ApiOperation({ summary: 'Get WhatsApp client status' })
+  @ApiOperation({
+    summary: 'Get WhatsApp client status',
+    description:
+      'Retrieves the current status and connection state of the WhatsApp client.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Returns the current status of the WhatsApp client.',
+    schema: {
+      type: 'object',
+      properties: {
+        isClientInitialized: {
+          type: 'boolean',
+          description: 'Whether the client has been initialized',
+        },
+        isClientAuthenticated: {
+          type: 'boolean',
+          description: 'Whether the client is authenticated',
+        },
+        isClientReady: {
+          type: 'boolean',
+          description: 'Whether the client is ready to send messages',
+        },
+        webHelpersInjected: {
+          type: 'boolean',
+          description: 'Whether WhatsApp Web helpers are properly injected',
+        },
+        hasQRCode: {
+          type: 'boolean',
+          description: 'Whether a QR code is currently available',
+        },
+        status: {
+          type: 'string',
+          enum: [
+            'initializing',
+            'waiting_for_qr_scan',
+            'authenticated_but_not_ready',
+            'ready',
+          ],
+          description: 'Current status of the client',
+        },
+      },
+    },
   })
+  @ApiProduces('application/json')
   async getClientStatus() {
     return this.whatsappService.getClientStatus();
   }
 
   @Post('restart')
-  @ApiOperation({ summary: 'Restart WhatsApp client' })
+  @ApiOperation({
+    summary: 'Restart WhatsApp client',
+    description:
+      'Restarts the WhatsApp client. This will disconnect and reconnect the WhatsApp Web session.',
+  })
   @ApiResponse({
     status: 200,
     description: 'WhatsApp client restarted successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'success',
+          description: 'Operation status',
+        },
+        message: {
+          type: 'string',
+          example: 'WhatsApp client restarted successfully',
+          description: 'Success message',
+        },
+        timestamp: {
+          type: 'string',
+          format: 'date-time',
+          example: '2025-01-12T10:30:00.000Z',
+          description: 'Timestamp when the restart was initiated',
+        },
+      },
+    },
   })
   @ApiResponse({
     status: 500,
     description: 'Failed to restart WhatsApp client.',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'Failed to restart WhatsApp client',
+        },
+        error: {
+          type: 'string',
+          example: 'Client restart failed due to internal error',
+        },
+      },
+    },
   })
+  @ApiConsumes('application/json')
+  @ApiProduces('application/json')
   async restartClient() {
     await this.whatsappService.restartClient();
     return {
@@ -77,14 +195,58 @@ export class WhatsAppController {
   }
 
   @Post('send')
-  @ApiOperation({ summary: 'Send a WhatsApp message' })
+  @ApiOperation({
+    summary: 'Send a WhatsApp message',
+    description:
+      'Sends a text message to a WhatsApp contact. The contact must be manually created in your phone first.',
+  })
   @ApiBody({ type: SendDto })
   @ApiResponse({
     status: 201,
     description: 'Message sent successfully',
     type: SendMessageResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid phone number or message',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'Invalid phone number format',
+        },
+        error: {
+          type: 'string',
+          example:
+            'CONTACT_NOT_FOUND: Contact with phone +1234567890 not found',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error or client not ready',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'CLIENT_NOT_READY: WhatsApp client is not ready yet',
+        },
+      },
+    },
+  })
+  @ApiConsumes('application/json')
+  @ApiProduces('application/json')
   async sendMessage(@Body() body: SendDto) {
     const { phone, message } = body;
     return this.whatsappService.sendMessage(phone, message);
@@ -265,7 +427,7 @@ export class WhatsAppController {
   @ApiOperation({
     summary: 'Configure webhook for handling messages from unknown contacts',
     description:
-      'Sets up a webhook URL to forward messages from non-registered contacts to an external API',
+      'Sets up a webhook URL to forward messages from non-registered contacts to an external API. When a message is received from an unknown contact, it will be forwarded to this webhook URL.',
   })
   @ApiBody({ type: WebhookConfigDto })
   @ApiResponse({
@@ -276,45 +438,243 @@ export class WhatsAppController {
   @ApiResponse({
     status: 400,
     description: 'Bad request - Invalid webhook configuration',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'Invalid webhook URL format',
+        },
+        error: {
+          type: 'string',
+          example: 'WEBHOOK_URL_INVALID: The provided URL is not valid',
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'Failed to configure webhook',
+        },
+      },
+    },
+  })
+  @ApiConsumes('application/json')
+  @ApiProduces('application/json')
   async configureWebhook(@Body() body: WebhookConfigDto) {
     return this.whatsappService.configureWebhook(body);
   }
 
   @Get('webhook/config')
-  @ApiOperation({ summary: 'Get current webhook configuration' })
+  @ApiOperation({
+    summary: 'Get current webhook configuration',
+    description:
+      'Retrieves the current webhook configuration including URL, method, and authentication settings.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Webhook configuration retrieved successfully',
+    schema: {
+      oneOf: [
+        {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              example: 'success',
+            },
+            config: {
+              type: 'object',
+              properties: {
+                url: {
+                  type: 'string',
+                  example: 'https://api.example.com/webhook',
+                },
+                method: {
+                  type: 'string',
+                  example: 'POST',
+                },
+                apiKey: {
+                  type: 'string',
+                  example: 'your-api-key-here',
+                },
+                timeout: {
+                  type: 'number',
+                  example: 10000,
+                },
+              },
+            },
+          },
+        },
+        {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              example: 'not_configured',
+            },
+            message: {
+              type: 'string',
+              example: 'No webhook configured',
+            },
+          },
+        },
+      ],
+    },
   })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'Failed to retrieve webhook configuration',
+        },
+      },
+    },
+  })
+  @ApiProduces('application/json')
   async getWebhookConfig() {
     return this.whatsappService.getWebhookConfig();
   }
 
   @Delete('webhook/remove')
-  @ApiOperation({ summary: 'Remove webhook configuration' })
+  @ApiOperation({
+    summary: 'Remove webhook configuration',
+    description:
+      'Removes the current webhook configuration. Messages from unknown contacts will no longer be forwarded.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Webhook configuration removed successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'success',
+        },
+        message: {
+          type: 'string',
+          example: 'Webhook configuration removed successfully',
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'Failed to remove webhook configuration',
+        },
+      },
+    },
+  })
+  @ApiProduces('application/json')
   async removeWebhook() {
     return this.whatsappService.removeWebhook();
   }
 
   @Post('webhook/test')
-  @ApiOperation({ summary: 'Test webhook configuration with sample data' })
+  @ApiOperation({
+    summary: 'Test webhook configuration with sample data',
+    description:
+      'Sends a test message to the configured webhook URL to verify the configuration is working correctly.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Webhook test completed successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'success',
+        },
+        message: {
+          type: 'string',
+          example: 'Webhook test successful',
+        },
+        response: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'number',
+              example: 200,
+            },
+            data: {
+              type: 'object',
+              description: 'Response data from the webhook',
+            },
+          },
+        },
+      },
+    },
   })
   @ApiResponse({
     status: 400,
     description: 'Bad request - No webhook configured',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'No webhook configured',
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'error',
+        },
+        message: {
+          type: 'string',
+          example: 'Webhook test failed: Connection timeout',
+        },
+      },
+    },
+  })
+  @ApiConsumes('application/json')
+  @ApiProduces('application/json')
   async testWebhook() {
     const testData = {
       messageId: 'test-message-id',
