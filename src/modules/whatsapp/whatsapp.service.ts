@@ -1561,8 +1561,42 @@ export class WhatsAppService implements OnModuleInit {
           mediaOptions.filename = filename;
         }
 
-        // Create MessageMedia object for proper image display
-        const media = await MessageMedia.fromUrl(mediaUrl);
+        // Create MessageMedia object for proper image display with timeout
+        this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+        let media: MessageMedia;
+        try {
+          media = (await Promise.race([
+            MessageMedia.fromUrl(mediaUrl),
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error('Media download timeout')),
+                30000,
+              ),
+            ),
+          ])) as MessageMedia;
+        } catch (downloadError) {
+          this.logger.warn(
+            `Failed to download media from URL: ${mediaUrl}. Error: ${downloadError.message}`,
+          );
+          // Fallback: send URL as text message
+          await this.client.sendMessage(
+            formattedPhone,
+            `${mediaType.toUpperCase()}: ${mediaUrl}${caption ? `\n\n${caption}` : ''}`,
+          );
+          return {
+            status: 'success',
+            phone: formattedPhone,
+            contactName,
+            media: {
+              type: mediaType,
+              url: mediaUrl,
+              caption,
+              filename,
+            },
+            sentAt: new Date().toISOString(),
+            note: 'Media sent as URL due to download failure',
+          };
+        }
 
         switch (mediaType.toLowerCase()) {
           case 'image':
@@ -1629,6 +1663,10 @@ export class WhatsAppService implements OnModuleInit {
         );
       } else if (error.message.includes('Unsupported media type')) {
         throw new Error(`MEDIA_TYPE_ERROR: ${error.message}`);
+      } else if (error.message.includes('Media download timeout')) {
+        throw new Error(
+          `MEDIA_DOWNLOAD_TIMEOUT: Media download timed out after 30 seconds. Please try with a smaller file or different URL.`,
+        );
       } else {
         throw new Error(`MEDIA_SEND_ERROR: ${error.message}`);
       }
@@ -1688,8 +1726,14 @@ export class WhatsAppService implements OnModuleInit {
         mediaOptions.filename = filename;
       }
 
-      // Create MessageMedia object for proper image display
-      const media = await MessageMedia.fromUrl(mediaUrl);
+      // Create MessageMedia object for proper image display with timeout
+      this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+      const media = (await Promise.race([
+        MessageMedia.fromUrl(mediaUrl),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Media download timeout')), 30000),
+        ),
+      ])) as MessageMedia;
 
       switch (mediaType.toLowerCase()) {
         case 'image':
@@ -1753,6 +1797,10 @@ export class WhatsAppService implements OnModuleInit {
         );
       } else if (error.message.includes('Unsupported media type')) {
         throw new Error(`MEDIA_TYPE_ERROR: ${error.message}`);
+      } else if (error.message.includes('Media download timeout')) {
+        throw new Error(
+          `MEDIA_DOWNLOAD_TIMEOUT: Media download timed out after 30 seconds. Please try with a smaller file or different URL.`,
+        );
       } else {
         throw new Error(`GROUP_MEDIA_SEND_ERROR: ${error.message}`);
       }
@@ -1824,8 +1872,14 @@ export class WhatsAppService implements OnModuleInit {
         mediaOptions.filename = filename;
       }
 
-      // Create MessageMedia object for proper image display
-      const media = await MessageMedia.fromUrl(mediaUrl);
+      // Create MessageMedia object for proper image display with timeout
+      this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+      const media = (await Promise.race([
+        MessageMedia.fromUrl(mediaUrl),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Media download timeout')), 30000),
+        ),
+      ])) as MessageMedia;
 
       switch (mediaType.toLowerCase()) {
         case 'image':
@@ -1889,6 +1943,10 @@ export class WhatsAppService implements OnModuleInit {
         );
       } else if (error.message.includes('Unsupported media type')) {
         throw new Error(`MEDIA_TYPE_ERROR: ${error.message}`);
+      } else if (error.message.includes('Media download timeout')) {
+        throw new Error(
+          `MEDIA_DOWNLOAD_TIMEOUT: Media download timed out after 30 seconds. Please try with a smaller file or different URL.`,
+        );
       } else {
         throw new Error(`DIFFUSION_MEDIA_SEND_ERROR: ${error.message}`);
       }
