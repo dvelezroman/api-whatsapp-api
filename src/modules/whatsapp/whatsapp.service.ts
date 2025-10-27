@@ -31,6 +31,14 @@ export class WhatsAppService implements OnModuleInit {
       return Array.isArray(chats);
     } catch (error) {
       this.logger.warn(`Web helpers test failed: ${error.message}`);
+
+      // Additional debugging information
+      if (error.message.includes('getChats')) {
+        this.logger.warn(
+          'WhatsApp Web helpers not properly injected. Client may need restart.',
+        );
+      }
+
       return false;
     }
   }
