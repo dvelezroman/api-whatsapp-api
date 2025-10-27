@@ -586,7 +586,7 @@ export class WhatsAppService implements OnModuleInit {
                   createdAt = date.toISOString();
                 }
               }
-            } catch (timestampError) {
+            } catch {
               this.logger.warn(
                 `Invalid timestamp for group ${group.name}: ${groupChat.createdAt}`,
               );
@@ -699,7 +699,7 @@ export class WhatsAppService implements OnModuleInit {
                   createdAt = date.toISOString();
                 }
               }
-            } catch (timestampError) {
+            } catch {
               this.logger.warn(
                 `Invalid timestamp for diffusion group ${group.name}: ${groupChat.createdAt}`,
               );
@@ -1067,7 +1067,7 @@ export class WhatsAppService implements OnModuleInit {
 
       return {
         status: 'success',
-        diffusion: {
+        group: {
           id: targetDiffusion.id._serialized,
           name: targetDiffusion.name,
           participantsCount: contacts.length,
@@ -1272,7 +1272,7 @@ export class WhatsAppService implements OnModuleInit {
               ) {
                 lastSeen = date.toISOString();
               }
-            } catch (timestampError) {
+            } catch {
               this.logger.warn(
                 `Invalid lastSeen timestamp for contact ${contactData.name}: ${contactData.lastSeen}`,
               );
@@ -1509,7 +1509,7 @@ export class WhatsAppService implements OnModuleInit {
       return {
         status: 'success',
         message: 'Diffusion group created successfully',
-        diffusion: {
+        group: {
           id: broadcastId,
           name: broadcastName,
           description: description || '',
@@ -2043,15 +2043,16 @@ export class WhatsAppService implements OnModuleInit {
           );
           // Fallback: send as text message
           await this.client.sendMessage(
-            targetGroup.id._serialized,
+            targetDiffusion.id._serialized,
             `${mediaType.toUpperCase()}: [Base64 data]${caption ? `\n\n${caption}` : ''}`,
           );
           return {
             status: 'success',
             group: {
-              id: targetGroup.id._serialized,
-              name: targetGroup.name,
-              participantsCount: (targetGroup as any).participants?.length || 0,
+              id: targetDiffusion.id._serialized,
+              name: targetDiffusion.name,
+              participantsCount:
+                (targetDiffusion as any).participants?.length || 0,
             },
             media: {
               type: mediaType,
@@ -2082,15 +2083,15 @@ export class WhatsAppService implements OnModuleInit {
           );
           // Fallback: send URL as text message
           await this.client.sendMessage(
-            targetGroup.id._serialized,
+            targetDiffusion.id._serialized,
             `${mediaType.toUpperCase()}: ${mediaUrl}${caption ? `\n\n${caption}` : ''}`,
           );
           return {
             status: 'success',
             group: {
-              id: targetGroup.id._serialized,
-              name: targetGroup.name,
-              participantsCount: (targetGroup as any).participants?.length || 0,
+              id: targetDiffusion.id._serialized,
+              name: targetDiffusion.name,
+              participantsCount: targetDiffusion.participants?.length || 0,
             },
             media: {
               type: mediaType,
@@ -2140,10 +2141,10 @@ export class WhatsAppService implements OnModuleInit {
 
       return {
         status: 'success',
-        diffusion: {
+        group: {
           id: targetDiffusion.id._serialized,
           name: targetDiffusion.name,
-          participantsCount: (targetDiffusion as any).participants?.length || 0,
+          participantsCount: targetDiffusion.participants?.length || 0,
         },
         media: {
           type: mediaType,
