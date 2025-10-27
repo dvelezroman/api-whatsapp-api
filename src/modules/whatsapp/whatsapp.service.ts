@@ -22,7 +22,112 @@ export class WhatsAppService implements OnModuleInit {
     timeout: number;
   } | null = null;
 
+  // Media cache configuration
+  private mediaCache: Map<
+    string,
+    {
+      media: MessageMedia;
+      timestamp: number;
+      url: string;
+    }
+  > = new Map();
+  private readonly CACHE_DURATION = 60 * 60 * 1000; // 60 minutes in milliseconds
+  private readonly MAX_CACHE_SIZE = 100; // Maximum number of cached items
+
   constructor(private configService: ConfigService) {}
+
+  /**
+   * Generate a cache key for a media URL
+   */
+  private getCacheKey(url: string): string {
+    // Use URL as key, but normalize it (remove query parameters for better cache hits)
+    try {
+      const urlObj = new URL(url);
+      return `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
+    } catch {
+      return url; // Fallback to original URL if parsing fails
+    }
+  }
+
+  /**
+   * Get cached media if available and not expired
+   */
+  private getCachedMedia(url: string): MessageMedia | null {
+    const cacheKey = this.getCacheKey(url);
+    const cached = this.mediaCache.get(cacheKey);
+
+    if (!cached) {
+      return null;
+    }
+
+    // Check if cache entry is expired
+    const now = Date.now();
+    if (now - cached.timestamp > this.CACHE_DURATION) {
+      this.mediaCache.delete(cacheKey);
+      this.logger.log(`Cache expired for media: ${url}`);
+      return null;
+    }
+
+    this.logger.log(`Using cached media: ${url}`);
+    return cached.media;
+  }
+
+  /**
+   * Cache media for future use
+   */
+  private setCachedMedia(url: string, media: MessageMedia): void {
+    const cacheKey = this.getCacheKey(url);
+
+    // Check cache size limit
+    if (this.mediaCache.size >= this.MAX_CACHE_SIZE) {
+      // Remove oldest entry (FIFO)
+      const oldestKey = this.mediaCache.keys().next().value;
+      this.mediaCache.delete(oldestKey);
+      this.logger.log(
+        `Cache limit reached, removed oldest entry: ${oldestKey}`,
+      );
+    }
+
+    this.mediaCache.set(cacheKey, {
+      media,
+      timestamp: Date.now(),
+      url,
+    });
+
+    this.logger.log(
+      `Cached media: ${url} (cache size: ${this.mediaCache.size})`,
+    );
+  }
+
+  /**
+   * Clear expired cache entries
+   */
+  private cleanExpiredCache(): void {
+    const now = Date.now();
+    let removedCount = 0;
+
+    for (const [key, cached] of this.mediaCache.entries()) {
+      if (now - cached.timestamp > this.CACHE_DURATION) {
+        this.mediaCache.delete(key);
+        removedCount++;
+      }
+    }
+
+    if (removedCount > 0) {
+      this.logger.log(`Cleaned ${removedCount} expired cache entries`);
+    }
+  }
+
+  /**
+   * Get cache statistics
+   */
+  private getCacheStats(): { size: number; maxSize: number; duration: number } {
+    return {
+      size: this.mediaCache.size,
+      maxSize: this.MAX_CACHE_SIZE,
+      duration: this.CACHE_DURATION,
+    };
+  }
 
   private async testWebHelpers(): Promise<boolean> {
     try {
@@ -144,6 +249,14 @@ export class WhatsAppService implements OnModuleInit {
     });
 
     this.client.initialize();
+
+    // Start automatic cache cleanup every 10 minutes
+    setInterval(
+      () => {
+        this.cleanExpiredCache();
+      },
+      30 * 60 * 1000,
+    ); // 10 minutes
   }
 
   private async handleIncomingMessage(message: any) {
@@ -1569,17 +1682,24 @@ export class WhatsAppService implements OnModuleInit {
           mediaOptions.filename = filename;
         }
 
-        // Create MessageMedia object for proper image display with timeout
-        this.logger.log(`Downloading media from URL: ${mediaUrl}`);
-        const media = (await Promise.race([
-          MessageMedia.fromUrl(mediaUrl),
-          new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error('Media download timeout')),
-              30000,
+        // Create MessageMedia object for proper image display with caching
+        let media = this.getCachedMedia(mediaUrl);
+
+        if (!media) {
+          this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+          media = (await Promise.race([
+            MessageMedia.fromUrl(mediaUrl),
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error('Media download timeout')),
+                30000,
+              ),
             ),
-          ),
-        ])) as MessageMedia;
+          ])) as MessageMedia;
+
+          // Cache the downloaded media
+          this.setCachedMedia(mediaUrl, media);
+        }
 
         switch (mediaType.toLowerCase()) {
           case 'image':
@@ -1709,14 +1829,24 @@ export class WhatsAppService implements OnModuleInit {
         mediaOptions.filename = filename;
       }
 
-      // Create MessageMedia object for proper image display with timeout
-      this.logger.log(`Downloading media from URL: ${mediaUrl}`);
-      const media = (await Promise.race([
-        MessageMedia.fromUrl(mediaUrl),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Media download timeout')), 30000),
-        ),
-      ])) as MessageMedia;
+      // Create MessageMedia object for proper image display with caching
+      let media = this.getCachedMedia(mediaUrl);
+
+      if (!media) {
+        this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+        media = (await Promise.race([
+          MessageMedia.fromUrl(mediaUrl),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('Media download timeout')),
+              30000,
+            ),
+          ),
+        ])) as MessageMedia;
+
+        // Cache the downloaded media
+        this.setCachedMedia(mediaUrl, media);
+      }
 
       switch (mediaType.toLowerCase()) {
         case 'image':
@@ -1855,14 +1985,24 @@ export class WhatsAppService implements OnModuleInit {
         mediaOptions.filename = filename;
       }
 
-      // Download media from URL
-      this.logger.log(`Downloading media from URL: ${mediaUrl}`);
-      const media = (await Promise.race([
-        MessageMedia.fromUrl(mediaUrl),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Media download timeout')), 30000),
-        ),
-      ])) as MessageMedia;
+      // Download media from URL with caching
+      let media = this.getCachedMedia(mediaUrl);
+
+      if (!media) {
+        this.logger.log(`Downloading media from URL: ${mediaUrl}`);
+        media = (await Promise.race([
+          MessageMedia.fromUrl(mediaUrl),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('Media download timeout')),
+              30000,
+            ),
+          ),
+        ])) as MessageMedia;
+
+        // Cache the downloaded media
+        this.setCachedMedia(mediaUrl, media);
+      }
 
       switch (mediaType.toLowerCase()) {
         case 'image':
@@ -1934,5 +2074,36 @@ export class WhatsAppService implements OnModuleInit {
         throw new Error(`DIFFUSION_MEDIA_SEND_ERROR: ${error.message}`);
       }
     }
+  }
+
+  /**
+   * Clear all cached media
+   */
+  async clearMediaCache() {
+    const clearedCount = this.mediaCache.size;
+    this.mediaCache.clear();
+
+    this.logger.log(`Cleared ${clearedCount} cached media files`);
+
+    return {
+      status: 'success',
+      message: 'Media cache cleared successfully',
+      clearedCount,
+    };
+  }
+
+  /**
+   * Get media cache statistics
+   */
+  async getMediaCacheStats() {
+    const stats = this.getCacheStats();
+
+    return {
+      status: 'success',
+      cache: {
+        ...stats,
+        durationMinutes: Math.round(stats.duration / (1000 * 60)),
+      },
+    };
   }
 }

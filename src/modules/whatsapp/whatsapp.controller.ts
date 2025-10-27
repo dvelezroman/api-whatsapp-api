@@ -845,4 +845,56 @@ export class WhatsAppController {
       searchById,
     );
   }
+
+  @Post('cache/clear')
+  @ApiOperation({
+    summary: 'Clear media cache',
+    description: 'Clears all cached media files',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Cache cleared successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', example: 'success' },
+        message: {
+          type: 'string',
+          example: 'Media cache cleared successfully',
+        },
+        clearedCount: { type: 'number', example: 5 },
+      },
+    },
+  })
+  async clearMediaCache() {
+    return this.whatsappService.clearMediaCache();
+  }
+
+  @Get('cache/stats')
+  @ApiOperation({
+    summary: 'Get media cache statistics',
+    description: 'Returns current cache statistics',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Cache statistics retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', example: 'success' },
+        cache: {
+          type: 'object',
+          properties: {
+            size: { type: 'number', example: 5 },
+            maxSize: { type: 'number', example: 100 },
+            duration: { type: 'number', example: 1800000 },
+            durationMinutes: { type: 'number', example: 30 },
+          },
+        },
+      },
+    },
+  })
+  async getMediaCacheStats() {
+    return this.whatsappService.getMediaCacheStats();
+  }
 }
