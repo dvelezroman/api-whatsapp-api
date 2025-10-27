@@ -5,6 +5,14 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Enable CORS for Swagger UI and API requests
+  app.enableCors({
+    origin: true, // Allow all origins in development
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    credentials: true,
+  });
+
   // Swagger configuration
   const config = new DocumentBuilder()
     .setTitle('WhatsApp API')
@@ -29,8 +37,6 @@ async function bootstrap() {
     .setVersion('1.0.0')
     .addTag('WhatsApp', 'Core WhatsApp messaging functionality')
     .addTag('Qr', 'QR code authentication endpoints')
-    .addServer('http://localhost:3005', 'Development server')
-    .addServer('https://your-domain.com', 'Production server')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
