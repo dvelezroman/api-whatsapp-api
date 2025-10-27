@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
 import * as QRCode from 'qrcode';
 import axios, { AxiosResponse } from 'axios';
@@ -1560,7 +1560,6 @@ export class WhatsAppService implements OnModuleInit {
         }
 
         // Send media message based on type
-        let message;
         const mediaOptions: any = {};
 
         if (caption) {
@@ -1571,29 +1570,32 @@ export class WhatsAppService implements OnModuleInit {
           mediaOptions.filename = filename;
         }
 
+        // Create MessageMedia object for proper image display
+        const media = await MessageMedia.fromUrl(mediaUrl);
+
         switch (mediaType.toLowerCase()) {
           case 'image':
-            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+            await this.client.sendMessage(formattedPhone, media, {
               ...mediaOptions,
             });
             break;
           case 'document':
-            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+            await this.client.sendMessage(formattedPhone, media, {
               ...mediaOptions,
             });
             break;
           case 'audio':
-            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+            await this.client.sendMessage(formattedPhone, media, {
               ...mediaOptions,
             });
             break;
           case 'video':
-            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+            await this.client.sendMessage(formattedPhone, media, {
               ...mediaOptions,
             });
             break;
           case 'sticker':
-            message = await this.client.sendMessage(formattedPhone, mediaUrl, {
+            await this.client.sendMessage(formattedPhone, media, {
               ...mediaOptions,
             });
             break;
@@ -1699,52 +1701,34 @@ export class WhatsAppService implements OnModuleInit {
         mediaOptions.filename = filename;
       }
 
-      let message;
+      // Create MessageMedia object for proper image display
+      const media = await MessageMedia.fromUrl(mediaUrl);
+
       switch (mediaType.toLowerCase()) {
         case 'image':
-          message = await this.client.sendMessage(
-            targetGroup.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetGroup.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         case 'document':
-          message = await this.client.sendMessage(
-            targetGroup.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetGroup.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         case 'audio':
-          message = await this.client.sendMessage(
-            targetGroup.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetGroup.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         case 'video':
-          message = await this.client.sendMessage(
-            targetGroup.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetGroup.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         case 'sticker':
-          message = await this.client.sendMessage(
-            targetGroup.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetGroup.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         default:
           throw new Error(`Unsupported media type: ${mediaType}`);
@@ -1853,52 +1837,34 @@ export class WhatsAppService implements OnModuleInit {
         mediaOptions.filename = filename;
       }
 
-      let message;
+      // Create MessageMedia object for proper image display
+      const media = await MessageMedia.fromUrl(mediaUrl);
+
       switch (mediaType.toLowerCase()) {
         case 'image':
-          message = await this.client.sendMessage(
-            targetDiffusion.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetDiffusion.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         case 'document':
-          message = await this.client.sendMessage(
-            targetDiffusion.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetDiffusion.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         case 'audio':
-          message = await this.client.sendMessage(
-            targetDiffusion.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetDiffusion.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         case 'video':
-          message = await this.client.sendMessage(
-            targetDiffusion.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetDiffusion.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         case 'sticker':
-          message = await this.client.sendMessage(
-            targetDiffusion.id._serialized,
-            mediaUrl,
-            {
-              ...mediaOptions,
-            },
-          );
+          await this.client.sendMessage(targetDiffusion.id._serialized, media, {
+            ...mediaOptions,
+          });
           break;
         default:
           throw new Error(`Unsupported media type: ${mediaType}`);

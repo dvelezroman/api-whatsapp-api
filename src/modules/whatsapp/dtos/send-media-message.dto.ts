@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsEnum, IsOptional, IsUrl, IsBase64 } from 'class-validator';
+import { IsString, IsEnum, IsOptional } from 'class-validator';
 
 export enum MediaType {
   IMAGE = 'image',
