@@ -318,19 +318,18 @@ export class WhatsAppService implements OnModuleInit {
           ? phone
           : phone.replace(/\D/g, '') + '@c.us';
 
-        // Validate if contact exists and was manually created
-        const contact = await this.client.getContactById(formattedPhone);
-
-        // Check if contact was manually created (has a name or pushname)
-        const contactName = contact.name || contact.pushname;
-        if (!contactName) {
-          throw new Error(
-            `Contact with phone ${formattedPhone} exists but was not manually created. Please add this contact to your phone's contact list first.`,
-          );
-        }
-
-        // Send message to the validated contact
+        // Send message directly to the phone number
         await this.client.sendMessage(formattedPhone, message);
+
+        // Try to get contact info for logging (optional)
+        let contactName = 'Unknown';
+        try {
+          const contact = await this.client.getContactById(formattedPhone);
+          contactName = contact.name || contact.pushname || 'Unknown';
+        } catch {
+          // Contact doesn't exist yet, that's okay
+          this.logger.log(`Sending message to new contact: ${formattedPhone}`);
+        }
 
         this.logger.log(`Message sent to ${contactName} (${formattedPhone})`);
 
@@ -354,10 +353,8 @@ export class WhatsAppService implements OnModuleInit {
         throw new Error(error.message);
       } else if (error.message.includes('not found')) {
         throw new Error(
-          `CONTACT_NOT_FOUND: Contact with phone ${phone} not found. Please add this contact to your phone's contact list first.`,
+          `CONTACT_NOT_FOUND: Contact with phone ${phone} not found.`,
         );
-      } else if (error.message.includes('not manually created')) {
-        throw new Error(`CONTACT_NOT_MANUAL: ${error.message}`);
       } else if (error.message.includes('Failed to send')) {
         throw new Error(
           `SEND_FAILED: Failed to send message. Please check if you have permission to send messages to this contact.`,
@@ -379,13 +376,8 @@ export class WhatsAppService implements OnModuleInit {
       // Check if contact exists using WhatsApp Web.js
       const contact = await this.client.getContactById(formattedPhone);
 
-      // Validate if contact was manually created (has a name or pushname)
-      const contactName = contact.name || contact.pushname;
-      if (!contactName) {
-        throw new Error(
-          `Contact with phone ${formattedPhone} exists but was not manually created. Please add this contact to your phone's contact list first.`,
-        );
-      }
+      // Get contact name for logging (optional)
+      const contactName = contact.name || contact.pushname || 'Unknown';
 
       this.logger.log(`Contact validated: ${formattedPhone} - ${contactName}`);
 
@@ -404,10 +396,8 @@ export class WhatsAppService implements OnModuleInit {
 
       if (error.message.includes('not found')) {
         throw new Error(
-          `CONTACT_NOT_FOUND: Contact with phone ${phone} not found. Please add this contact to your phone's contact list first.`,
+          `CONTACT_NOT_FOUND: Contact with phone ${phone} not found.`,
         );
-      } else if (error.message.includes('not manually created')) {
-        throw new Error(`CONTACT_NOT_MANUAL: ${error.message}`);
       } else {
         throw new Error(`CONTACT_VALIDATION_ERROR: ${error.message}`);
       }
@@ -1550,13 +1540,14 @@ export class WhatsAppService implements OnModuleInit {
           ? phone
           : phone.replace(/\D/g, '') + '@c.us';
 
-        // Validate if contact exists and was manually created
-        const contact = await this.client.getContactById(formattedPhone);
-        const contactName = contact.name || contact.pushname;
-        if (!contactName) {
-          throw new Error(
-            `Contact with phone ${formattedPhone} exists but was not manually created. Please add this contact to your phone's contact list first.`,
-          );
+        // Try to get contact info for logging (optional)
+        let contactName = 'Unknown';
+        try {
+          const contact = await this.client.getContactById(formattedPhone);
+          contactName = contact.name || contact.pushname || 'Unknown';
+        } catch {
+          // Contact doesn't exist yet, that's okay
+          this.logger.log(`Sending media to new contact: ${formattedPhone}`);
         }
 
         // Send media message based on type
@@ -1634,11 +1625,7 @@ export class WhatsAppService implements OnModuleInit {
         throw new Error(error.message);
       } else if (error.message.includes('not found')) {
         throw new Error(
-          `CONTACT_NOT_FOUND: Contact with phone ${phone} not found. Please add this contact to your phone's contact list first.`,
-        );
-      } else if (error.message.includes('not manually created')) {
-        throw new Error(
-          `CONTACT_NOT_MANUAL: Contact with phone ${phone} exists but was not manually created. Please add this contact to your phone's contact list first.`,
+          `CONTACT_NOT_FOUND: Contact with phone ${phone} not found.`,
         );
       } else if (error.message.includes('Unsupported media type')) {
         throw new Error(`MEDIA_TYPE_ERROR: ${error.message}`);

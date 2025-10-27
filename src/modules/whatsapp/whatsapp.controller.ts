@@ -198,7 +198,7 @@ export class WhatsAppController {
   @ApiOperation({
     summary: 'Send a WhatsApp message',
     description:
-      'Sends a text message to a WhatsApp contact. The contact must be manually created in your phone first.',
+      'Sends a text message to any WhatsApp number. No need to add contacts manually.',
   })
   @ApiBody({ type: SendDto })
   @ApiResponse({
@@ -254,10 +254,9 @@ export class WhatsAppController {
 
   @Post('contacts')
   @ApiOperation({
-    summary:
-      'Validate a WhatsApp contact (must be manually created in your phone first)',
+    summary: 'Validate a WhatsApp contact',
     description:
-      "Validates that a contact exists and was manually created in your phone's contact list. Does not create new contacts.",
+      'Validates that a contact exists in WhatsApp. Does not require manual contact creation.',
   })
   @ApiBody({ type: SaveContactDto })
   @ApiResponse({

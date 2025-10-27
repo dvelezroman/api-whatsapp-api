@@ -11,7 +11,7 @@ export enum MediaType {
 
 export class SendMediaMessageDto {
   @ApiProperty({
-    description: 'Phone number of the contact (without @c.us suffix)',
+    description: 'Phone number of the contact (any valid WhatsApp number)',
     example: '+593995710556',
   })
   @IsString()

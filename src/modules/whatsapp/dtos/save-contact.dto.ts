@@ -3,8 +3,7 @@ import { IsString, IsOptional } from 'class-validator';
 
 export class SaveContactDto {
   @ApiProperty({
-    description:
-      'Phone number of the contact (must be manually created in your phone first)',
+    description: 'Phone number of the contact (any valid WhatsApp number)',
     example: '1234567890',
   })
   @IsString()
