@@ -6,13 +6,24 @@ services:
     container_name: whatsapp-api
     ports:
       - "3005:3005"
-    restart: always
+    restart: unless-stopped
     environment:
       - NODE_ENV=production
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     volumes:
       - ./whatsapp-session:/app/whatsapp-session
     networks:
       - whatsapp_net
+    shm_size: '2gb'
+    mem_limit: 2g
+    mem_reservation: 1g
+    cpus: '1.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 networks:
   whatsapp_net:

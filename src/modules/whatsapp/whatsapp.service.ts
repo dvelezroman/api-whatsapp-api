@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
 import * as QRCode from 'qrcode';
@@ -8,8 +13,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
-export class WhatsAppService implements OnModuleInit {
-  private client: Client;
+export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
+  private client: Client | null = null;
   private readonly logger = new Logger(WhatsAppService.name);
   private qrCodeData: string | null = null; // Store latest QR code
   private isClientReady: boolean = false; // Track client readiness
@@ -303,14 +308,17 @@ export class WhatsAppService implements OnModuleInit {
 
   private async testWebHelpers(): Promise<boolean> {
     try {
+      if (!this.client) {
+        return false;
+      }
       // Try to get a simple chat to test if helpers are working
       const chats = await this.client.getChats();
       return Array.isArray(chats);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(`Web helpers test failed: ${error.message}`);
 
       // Additional debugging information
-      if (error.message.includes('getChats')) {
+      if (error.message?.includes('getChats')) {
         this.logger.warn(
           'WhatsApp Web helpers not properly injected. Client may need restart.',
         );
@@ -324,6 +332,13 @@ export class WhatsAppService implements OnModuleInit {
     if (!this.client) {
       throw new Error(
         'CLIENT_NOT_INITIALIZED: WhatsApp client has not been initialized yet. Please wait for the client to initialize.',
+      );
+    }
+    // Additional check to ensure client is not destroyed
+    const clientAny = this.client as any;
+    if (clientAny.pupPage?.isClosed()) {
+      throw new Error(
+        'CLIENT_DESTROYED: WhatsApp client has been destroyed. Please restart the service.',
       );
     }
     if (!this.isClientAuthenticated) {
@@ -356,6 +371,33 @@ export class WhatsAppService implements OnModuleInit {
 
     // Start initialization with retry logic
     this.initializeClientWithRetry();
+  }
+
+  async onModuleDestroy() {
+    this.logger.log('Shutting down WhatsApp Client...');
+
+    // Clear any pending retry timeout
+    if (this.initializationRetryTimeout) {
+      clearTimeout(this.initializationRetryTimeout);
+      this.initializationRetryTimeout = null;
+    }
+
+    // Clean up client
+    if (this.client) {
+      try {
+        await this.client.destroy();
+        this.logger.log('WhatsApp Client destroyed successfully');
+      } catch (error: any) {
+        this.logger.warn(
+          `Error destroying WhatsApp client during shutdown: ${error.message}`,
+        );
+      } finally {
+        this.client = null;
+      }
+    }
+
+    // Clean up Chromium locks on shutdown
+    await this.cleanupChromiumLocks();
   }
 
   private async initializeClientWithRetry() {
@@ -611,6 +653,12 @@ export class WhatsAppService implements OnModuleInit {
     try {
       // Skip messages from self
       if (message.fromMe) {
+        return;
+      }
+
+      // Check if client is available
+      if (!this.client) {
+        this.logger.warn('Cannot handle message: client not initialized');
         return;
       }
 
