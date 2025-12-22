@@ -40,24 +40,20 @@ if ls whatsapp-session-backup-* 1> /dev/null 2>&1; then
     print_status "Old backups cleaned up"
 fi
 
-# Backup current session (just in case)
-print_status "Creating session backup..."
+# Backup current session
 if [ -d "whatsapp-session" ]; then
-    # Fix permissions before backup
-    print_status "Fixing session permissions before backup..."
-    sudo chown -R $(id -u):$(id -g) whatsapp-session 2>/dev/null || true
-    chmod -R 755 whatsapp-session 2>/dev/null || true
-    
-    # Create backup
+    sudo chown -R $(id -u):$(id -g) whatsapp-session || true
+    chmod -R 755 whatsapp-session || true
     cp -r whatsapp-session whatsapp-session-backup-$(date +%Y%m%d-%H%M%S)
-    print_status "Session backup created"
-else
-    print_warning "No existing session found. This is normal for first deployment."
 fi
 
-# Stop the current container
-print_status "Stopping current container..."
-docker-compose down || true
+# 🔥 CLEAN CHROMIUM LOCKS
+print_status "Cleaning Chromium lock files..."
+find whatsapp-session -name "Singleton*" -type f -delete || true
+
+# Stop container GRACEFULLY
+print_status "Stopping container gracefully..."
+docker-compose stop || true
 
 # Pull latest changes (if using git)
 if [ -d ".git" ]; then
@@ -65,11 +61,11 @@ if [ -d ".git" ]; then
     git pull origin main || git pull origin master || print_warning "Could not pull latest changes"
 fi
 
-# Build the new image
+# Build
 print_status "Building new Docker image..."
-docker-compose build --no-cache
+docker-compose build
 
-# Start the container
+# Start
 print_status "Starting container..."
 docker-compose up -d
 

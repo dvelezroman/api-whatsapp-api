@@ -4,11 +4,18 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: whatsapp-api
+    # ⚠️ REGLA DE ORO: Solo UNA instancia permitida (WhatsApp NO soporta clustering)
+    # ❌ NUNCA usar scale o replicas para este servicio
+    deploy:
+      replicas: 1
     ports:
       - "3005:3005"
-    restart: always
+    restart: unless-stopped
     environment:
       - NODE_ENV=production
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    # ✅ REGLA DE ORO: Volumen persistente para mantener la sesión
+    # ✅ REGLA DE ORO: Cada contenedor tiene su propia sesión (no compartida)
     volumes:
       - ./whatsapp-session:/app/whatsapp-session
     networks:
