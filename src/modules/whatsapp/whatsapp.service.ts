@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnModuleInit,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
 import * as QRCode from 'qrcode';
@@ -11,10 +6,14 @@ import axios, { AxiosResponse } from 'axios';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 @Injectable()
-export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
-  private client: Client | null = null;
+export class WhatsAppService implements OnModuleInit {
+  private client: Client;
   private readonly logger = new Logger(WhatsAppService.name);
   private qrCodeData: string | null = null; // Store latest QR code
   private isClientReady: boolean = false; // Track client readiness
@@ -114,10 +113,37 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Kill any lingering Chromium processes
+   */
+  private async killChromiumProcesses(): Promise<void> {
+    try {
+      this.logger.warn('Killing any lingering Chromium processes...');
+
+      // Kill chromium processes
+      try {
+        await execAsync('pkill -9 chromium || true');
+        await execAsync('pkill -9 chrome || true');
+        await execAsync('pkill -9 chromium-browser || true');
+        // Wait a bit for processes to die
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        this.logger.log('Chromium processes killed');
+      } catch (error: any) {
+        // Ignore errors if no processes found
+        this.logger.debug(`No Chromium processes to kill: ${error.message}`);
+      }
+    } catch (error: any) {
+      this.logger.debug(`Error killing Chromium processes: ${error.message}`);
+    }
+  }
+
+  /**
    * Clean up Chromium lock files that may prevent browser launch
    */
   private async cleanupChromiumLocks(): Promise<void> {
     try {
+      // First, kill any lingering processes
+      await this.killChromiumProcesses();
+
       const sessionPath = path.resolve('./whatsapp-session');
       if (!fs.existsSync(sessionPath)) {
         return;
@@ -128,7 +154,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       // Recursively remove all lock files
       this.removeLockFilesRecursive(sessionPath);
 
-      // Also specifically check common locations
+      // Also specifically check common locations with more paths
       const commonLockPaths = [
         'SingletonLock',
         'lockfile',
@@ -136,33 +162,55 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
         'Default/SingletonLock',
         'Default/lockfile',
         'Default/.lock',
+        'Default/SingletonCookie',
         'Session Storage/SingletonLock',
         'Local Storage/SingletonLock',
+        'IndexedDB/SingletonLock',
+        'GPUCache/SingletonLock',
       ];
 
-      for (const lockFile of commonLockPaths) {
-        const lockPath = path.join(sessionPath, lockFile);
-        try {
-          if (fs.existsSync(lockPath)) {
-            this.logger.warn(`Removing Chromium lock file: ${lockPath}`);
-            try {
-              fs.chmodSync(lockPath, 0o666); // Make writable first
-              fs.unlinkSync(lockPath);
-            } catch (error: any) {
-              if (error.code !== 'ENOENT') {
-                this.logger.debug(
-                  `Could not remove lock file ${lockPath}: ${error.message}`,
-                );
+      // Try multiple times to ensure locks are removed
+      for (let attempt = 0; attempt < 3; attempt++) {
+        for (const lockFile of commonLockPaths) {
+          const lockPath = path.join(sessionPath, lockFile);
+          try {
+            if (fs.existsSync(lockPath)) {
+              this.logger.warn(`Removing Chromium lock file: ${lockPath}`);
+              try {
+                // Try to read and remove
+                const stats = fs.statSync(lockPath);
+                if (stats.isFile()) {
+                  fs.chmodSync(lockPath, 0o666); // Make writable first
+                  fs.unlinkSync(lockPath);
+                  this.logger.log(`Removed lock file: ${lockPath}`);
+                }
+              } catch (error: any) {
+                if (error.code !== 'ENOENT') {
+                  this.logger.debug(
+                    `Could not remove lock file ${lockPath}: ${error.message}`,
+                  );
+                  // Try force removal
+                  try {
+                    await execAsync(`rm -f "${lockPath}"`);
+                  } catch {
+                    // Ignore
+                  }
+                }
               }
             }
+          } catch {
+            // Ignore errors
           }
-        } catch {
-          // Ignore errors
+        }
+
+        // Wait between attempts
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
       }
 
-      // Wait a bit to ensure file system operations complete
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait longer to ensure file system operations complete
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
       this.logger.log('Chromium lock file cleanup completed');
     } catch (error: any) {
@@ -308,17 +356,14 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
 
   private async testWebHelpers(): Promise<boolean> {
     try {
-      if (!this.client) {
-        return false;
-      }
       // Try to get a simple chat to test if helpers are working
       const chats = await this.client.getChats();
       return Array.isArray(chats);
-    } catch (error: any) {
+    } catch (error) {
       this.logger.warn(`Web helpers test failed: ${error.message}`);
 
       // Additional debugging information
-      if (error.message?.includes('getChats')) {
+      if (error.message.includes('getChats')) {
         this.logger.warn(
           'WhatsApp Web helpers not properly injected. Client may need restart.',
         );
@@ -332,13 +377,6 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     if (!this.client) {
       throw new Error(
         'CLIENT_NOT_INITIALIZED: WhatsApp client has not been initialized yet. Please wait for the client to initialize.',
-      );
-    }
-    // Additional check to ensure client is not destroyed
-    const clientAny = this.client as any;
-    if (clientAny.pupPage?.isClosed()) {
-      throw new Error(
-        'CLIENT_DESTROYED: WhatsApp client has been destroyed. Please restart the service.',
       );
     }
     if (!this.isClientAuthenticated) {
@@ -371,33 +409,6 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
 
     // Start initialization with retry logic
     this.initializeClientWithRetry();
-  }
-
-  async onModuleDestroy() {
-    this.logger.log('Shutting down WhatsApp Client...');
-
-    // Clear any pending retry timeout
-    if (this.initializationRetryTimeout) {
-      clearTimeout(this.initializationRetryTimeout);
-      this.initializationRetryTimeout = null;
-    }
-
-    // Clean up client
-    if (this.client) {
-      try {
-        await this.client.destroy();
-        this.logger.log('WhatsApp Client destroyed successfully');
-      } catch (error: any) {
-        this.logger.warn(
-          `Error destroying WhatsApp client during shutdown: ${error.message}`,
-        );
-      } finally {
-        this.client = null;
-      }
-    }
-
-    // Clean up Chromium locks on shutdown
-    await this.cleanupChromiumLocks();
   }
 
   private async initializeClientWithRetry() {
@@ -454,8 +465,8 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       // Clean up Chromium lock files before initializing
       await this.cleanupChromiumLocks();
 
-      // Wait a bit longer to ensure any lingering processes are gone and file system is ready
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Wait longer to ensure any lingering processes are gone and file system is ready
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       // Reset state flags
       this.isClientReady = false;
@@ -653,12 +664,6 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     try {
       // Skip messages from self
       if (message.fromMe) {
-        return;
-      }
-
-      // Check if client is available
-      if (!this.client) {
-        this.logger.warn('Cannot handle message: client not initialized');
         return;
       }
 

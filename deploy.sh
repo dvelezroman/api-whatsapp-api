@@ -32,6 +32,14 @@ if [ ! -f "docker-compose.yml" ]; then
     exit 1
 fi
 
+# Clean up old backups (keep only last 3)
+print_status "Cleaning up old session backups (keeping last 3)..."
+if ls whatsapp-session-backup-* 1> /dev/null 2>&1; then
+    # Sort by modification time, keep last 3, delete the rest
+    ls -t whatsapp-session-backup-* 2>/dev/null | tail -n +4 | xargs rm -rf 2>/dev/null || true
+    print_status "Old backups cleaned up"
+fi
+
 # Backup current session (just in case)
 print_status "Creating session backup..."
 if [ -d "whatsapp-session" ]; then
