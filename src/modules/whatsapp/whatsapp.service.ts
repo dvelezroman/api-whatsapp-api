@@ -4,6 +4,8 @@ import * as qrcode from 'qrcode-terminal';
 import * as QRCode from 'qrcode';
 import axios, { AxiosResponse } from 'axios';
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class WhatsAppService implements OnModuleInit {
@@ -38,6 +40,68 @@ export class WhatsAppService implements OnModuleInit {
   private readonly MAX_CACHE_SIZE = 100; // Maximum number of cached items
 
   constructor(private configService: ConfigService) {}
+
+  /**
+   * Clean up Chromium lock files that may prevent browser launch
+   */
+  private async cleanupChromiumLocks(): Promise<void> {
+    try {
+      const sessionPath = path.resolve('./whatsapp-session');
+      if (!fs.existsSync(sessionPath)) {
+        return;
+      }
+
+      // Look for lock files in the session directory
+      const lockFiles = [
+        'SingletonLock',
+        'lockfile',
+        '.lock',
+        'Default/SingletonLock',
+        'Default/lockfile',
+        'Default/.lock',
+      ];
+
+      for (const lockFile of lockFiles) {
+        const lockPath = path.join(sessionPath, lockFile);
+        try {
+          if (fs.existsSync(lockPath)) {
+            this.logger.warn(`Removing Chromium lock file: ${lockPath}`);
+            fs.unlinkSync(lockPath);
+          }
+        } catch (error: any) {
+          // Ignore errors if file doesn't exist or can't be deleted
+          if (error.code !== 'ENOENT') {
+            this.logger.debug(
+              `Could not remove lock file ${lockPath}: ${error.message}`,
+            );
+          }
+        }
+      }
+
+      // Also check for lock files in Default directory
+      const defaultPath = path.join(sessionPath, 'Default');
+      if (fs.existsSync(defaultPath)) {
+        const defaultLockFiles = fs
+          .readdirSync(defaultPath)
+          .filter((file) => file.includes('lock') || file.includes('Lock'));
+        for (const lockFile of defaultLockFiles) {
+          const lockPath = path.join(defaultPath, lockFile);
+          try {
+            this.logger.warn(`Removing Chromium lock file: ${lockPath}`);
+            fs.unlinkSync(lockPath);
+          } catch (error: any) {
+            if (error.code !== 'ENOENT') {
+              this.logger.debug(
+                `Could not remove lock file ${lockPath}: ${error.message}`,
+              );
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(`Error cleaning up Chromium locks: ${error.message}`);
+    }
+  }
 
   /**
    * Generate a cache key for a media URL
@@ -214,13 +278,34 @@ export class WhatsAppService implements OnModuleInit {
       // Clean up previous client if it exists
       if (this.client) {
         try {
-          await this.client.destroy();
-        } catch (destroyError) {
-          this.logger.warn(
-            `Error destroying previous client: ${destroyError.message}`,
-          );
+          // Check if client has a valid puppeteer instance before destroying
+          const clientAny = this.client as any;
+          if (clientAny.pupPage && !clientAny.pupPage.isClosed()) {
+            await this.client.destroy();
+          } else {
+            this.logger.warn(
+              'Client already destroyed or invalid, skipping destroy',
+            );
+          }
+        } catch (destroyError: any) {
+          // Ignore errors about already destroyed clients
+          if (
+            !destroyError.message?.includes('Target closed') &&
+            !destroyError.message?.includes('Session closed') &&
+            !destroyError.message?.includes('Cannot read properties of null')
+          ) {
+            this.logger.warn(
+              `Error destroying previous client: ${destroyError.message}`,
+            );
+          }
+        } finally {
+          // Set to null after cleanup attempt
+          this.client = null as any;
         }
       }
+
+      // Clean up Chromium lock files before initializing
+      await this.cleanupChromiumLocks();
 
       // Reset state flags
       this.isClientReady = false;
@@ -261,6 +346,9 @@ export class WhatsAppService implements OnModuleInit {
             '--single-process', // Run in single process mode to avoid context issues
             '--disable-extensions',
             '--disable-plugins',
+            '--disable-background-networking',
+            '--disable-default-apps',
+            '--disable-sync',
           ],
           headless: true,
           timeout: 60000, // 60 second timeout
@@ -281,16 +369,26 @@ export class WhatsAppService implements OnModuleInit {
         `Error initializing WhatsApp client (attempt ${this.initializationAttempts}/${this.maxInitializationAttempts}): ${error.message}`,
       );
 
-      // Check if it's a protocol error that we should retry
-      if (
+      // Check if it's a protocol error or profile lock error that we should retry
+      const isProtocolError =
         error.message?.includes('Protocol error') ||
         error.message?.includes('Execution context was destroyed') ||
         error.message?.includes('Target closed') ||
-        error.message?.includes('Session closed')
-      ) {
+        error.message?.includes('Session closed');
+
+      const isProfileLockError =
+        error.message?.includes('profile appears to be in use') ||
+        error.message?.includes('another Chromium process') ||
+        error.message?.includes('Failed to launch the browser process');
+
+      if (isProtocolError || isProfileLockError) {
         this.logger.warn(
-          'Protocol error detected. This is usually temporary. Will retry...',
+          `${isProfileLockError ? 'Profile lock' : 'Protocol'} error detected. This is usually temporary. Will retry...`,
         );
+        // Clean up locks again before retry
+        if (isProfileLockError) {
+          await this.cleanupChromiumLocks();
+        }
         // Schedule retry
         this.initializationRetryTimeout = setTimeout(() => {
           this.initializeClientWithRetry();
