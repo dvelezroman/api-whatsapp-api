@@ -104,6 +104,49 @@ export class WhatsAppService implements OnModuleInit {
   }
 
   /**
+   * Bypass Content Security Policy to allow script injection
+   */
+  private async bypassCSP(): Promise<void> {
+    try {
+      // Access the internal puppeteer page from whatsapp-web.js client
+      const clientAny = this.client as any;
+      const page = clientAny.pupPage;
+
+      if (page && !page.isClosed()) {
+        // Set bypass CSP on the page
+        await page.setBypassCSP(true);
+
+        // Inject script to modify CSP meta tag if it exists
+        await page.evaluateOnNewDocument(() => {
+          // Remove CSP meta tags
+          const metaTags = document.querySelectorAll(
+            'meta[http-equiv="Content-Security-Policy"]',
+          );
+          metaTags.forEach((tag) => tag.remove());
+
+          // Override CSP by modifying the meta tag
+          const meta = document.createElement('meta');
+          meta.httpEquiv = 'Content-Security-Policy';
+          meta.content =
+            "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline';";
+          document.head.appendChild(meta);
+
+          // Override eval to allow script evaluation
+          const originalEval = (window as any).eval;
+          (window as any).eval = function (code: string) {
+            return originalEval.call(window, code);
+          };
+        });
+
+        this.logger.log('CSP bypass configured successfully');
+      }
+    } catch (error: any) {
+      // Log but don't fail - CSP bypass is optional
+      this.logger.debug(`Could not bypass CSP: ${error.message}`);
+    }
+  }
+
+  /**
    * Generate a cache key for a media URL
    */
   private getCacheKey(url: string): string {
@@ -327,7 +370,7 @@ export class WhatsAppService implements OnModuleInit {
             '--no-zygote',
             '--disable-gpu',
             '--disable-web-security',
-            '--disable-features=VizDisplayCompositor',
+            '--disable-features=VizDisplayCompositor,IsolateOrigins,site-per-process',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
@@ -348,7 +391,7 @@ export class WhatsAppService implements OnModuleInit {
             '--disable-plugins',
             '--disable-background-networking',
             '--disable-default-apps',
-            '--disable-sync',
+            '--disable-site-isolation-trials', // Disable site isolation to allow script injection
           ],
           headless: true,
           timeout: 60000, // 60 second timeout
@@ -420,16 +463,22 @@ export class WhatsAppService implements OnModuleInit {
       }
     });
 
-    this.client.on('ready', () => {
+    this.client.on('ready', async () => {
       this.logger.log('WhatsApp Client is ready!');
       this.qrCodeData = null; // No QR needed anymore
       this.isClientReady = true; // Mark client as ready
       this.initializationAttempts = 0; // Reset attempts on success
+
+      // Bypass CSP after client is ready
+      await this.bypassCSP();
     });
 
-    this.client.on('authenticated', () => {
+    this.client.on('authenticated', async () => {
       this.logger.log('WhatsApp Client authenticated successfully!');
       this.isClientAuthenticated = true; // Mark client as authenticated
+
+      // Try to bypass CSP early after authentication
+      await this.bypassCSP();
     });
 
     this.client.on('auth_failure', (msg) => {
