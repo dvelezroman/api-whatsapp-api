@@ -268,37 +268,93 @@ export class WhatsAppService implements OnModuleInit {
 
       // Get sender information
       const sender = message.from;
-      const senderContact = await this.client.getContactById(sender);
+      let senderContact: any = null;
+      let isRegisteredContact = false;
 
-      // Check if sender is a registered contact (has name or pushname)
-      const isRegisteredContact = senderContact.name || senderContact.pushname;
+      // Try to get contact information, but handle errors gracefully
+      try {
+        senderContact = await this.client.getContactById(sender);
+        // Check if sender is a registered contact (has name or pushname)
+        isRegisteredContact = Boolean(
+          senderContact?.name || senderContact?.pushname,
+        );
+      } catch (contactError) {
+        // Handle known WhatsApp Web API compatibility issues
+        if (
+          contactError.message?.includes('getIsMyContact') ||
+          contactError.message?.includes('ContactMethods') ||
+          contactError.message?.includes('getContactModel') ||
+          contactError.message?.includes('getContact')
+        ) {
+          this.logger.warn(
+            `Unable to retrieve contact info for ${sender} due to WhatsApp Web API changes. Using fallback contact data.`,
+          );
+          // Create a minimal contact object from message data
+          senderContact = {
+            id: {
+              _serialized: sender,
+              user: sender.replace('@c.us', ''),
+            },
+            pushname: message.notifyName || null,
+            name: null,
+            isBusiness: false,
+            isVerified: false,
+          };
+          // Assume it's not a registered contact if we can't verify
+          isRegisteredContact = false;
+        } else {
+          // Re-throw if it's a different error
+          throw contactError;
+        }
+      }
 
-      // If unknown contact, save it first
-      if (!isRegisteredContact) {
-        await this.saveUnknownContact(senderContact);
+      // If unknown contact, try to save it (but don't fail if this fails)
+      if (!isRegisteredContact && senderContact) {
+        try {
+          await this.saveUnknownContact(senderContact);
+        } catch (saveError) {
+          this.logger.warn(
+            `Failed to save unknown contact ${sender}: ${saveError.message}`,
+          );
+        }
       }
 
       // Forward to webhook if configured (for ALL contacts)
-      if (this.webhookConfig) {
-        await this.forwardToWebhook(
-          message,
-          senderContact,
-          Boolean(isRegisteredContact),
-        );
+      if (this.webhookConfig && senderContact) {
+        try {
+          await this.forwardToWebhook(
+            message,
+            senderContact,
+            isRegisteredContact,
+          );
+        } catch (webhookError) {
+          this.logger.error(
+            `Failed to forward message to webhook: ${webhookError.message}`,
+          );
+        }
       } else {
         // Log messages when no webhook is configured
+        const contactName =
+          senderContact?.name ||
+          senderContact?.pushname ||
+          message.notifyName ||
+          'Unknown';
         if (!isRegisteredContact) {
           this.logger.warn(
-            `Message from unknown contact ${sender}: ${message.body}`,
+            `Message from unknown contact ${sender} (${contactName}): ${message.body}`,
           );
         } else {
           this.logger.log(
-            `Message from registered contact ${senderContact.name || senderContact.pushname}: ${message.body}`,
+            `Message from registered contact ${contactName} (${sender}): ${message.body}`,
           );
         }
       }
     } catch (error) {
       this.logger.error(`Error handling incoming message: ${error.message}`);
+      // Log the full error stack for debugging
+      if (error.stack) {
+        this.logger.debug(`Error stack: ${error.stack}`);
+      }
     }
   }
 
