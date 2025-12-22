@@ -42,6 +42,73 @@ export class WhatsAppService implements OnModuleInit {
   constructor(private configService: ConfigService) {}
 
   /**
+   * Recursively find and remove lock files
+   */
+  private removeLockFilesRecursive(dir: string, depth: number = 0): void {
+    if (depth > 5) return; // Prevent infinite recursion
+
+    try {
+      if (!fs.existsSync(dir)) {
+        return;
+      }
+
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+
+        try {
+          // Check if it's a lock file
+          const isLockFile =
+            entry.name.toLowerCase().includes('lock') ||
+            entry.name === 'SingletonLock' ||
+            entry.name === 'lockfile' ||
+            entry.name.startsWith('.lock');
+
+          if (isLockFile && entry.isFile()) {
+            this.logger.warn(`Removing Chromium lock file: ${fullPath}`);
+            try {
+              fs.unlinkSync(fullPath);
+            } catch (unlinkError: any) {
+              // Try to force remove by changing permissions first
+              if (
+                unlinkError.code === 'EACCES' ||
+                unlinkError.code === 'EPERM'
+              ) {
+                try {
+                  fs.chmodSync(fullPath, 0o666);
+                  fs.unlinkSync(fullPath);
+                  this.logger.warn(`Force removed lock file: ${fullPath}`);
+                } catch (forceError: any) {
+                  this.logger.debug(
+                    `Could not force remove lock file ${fullPath}: ${forceError.message}`,
+                  );
+                }
+              } else if (unlinkError.code !== 'ENOENT') {
+                this.logger.debug(
+                  `Could not remove lock file ${fullPath}: ${unlinkError.message}`,
+                );
+              }
+            }
+          } else if (entry.isDirectory()) {
+            // Recursively search subdirectories
+            this.removeLockFilesRecursive(fullPath, depth + 1);
+          }
+        } catch (entryError: any) {
+          // Skip entries we can't read
+          if (entryError.code !== 'EACCES' && entryError.code !== 'EPERM') {
+            this.logger.debug(
+              `Error processing entry ${fullPath}: ${entryError.message}`,
+            );
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.debug(`Error reading directory ${dir}: ${error.message}`);
+    }
+  }
+
+  /**
    * Clean up Chromium lock files that may prevent browser launch
    */
   private async cleanupChromiumLocks(): Promise<void> {
@@ -51,53 +118,48 @@ export class WhatsAppService implements OnModuleInit {
         return;
       }
 
-      // Look for lock files in the session directory
-      const lockFiles = [
+      this.logger.warn('Cleaning up Chromium lock files...');
+
+      // Recursively remove all lock files
+      this.removeLockFilesRecursive(sessionPath);
+
+      // Also specifically check common locations
+      const commonLockPaths = [
         'SingletonLock',
         'lockfile',
         '.lock',
         'Default/SingletonLock',
         'Default/lockfile',
         'Default/.lock',
+        'Session Storage/SingletonLock',
+        'Local Storage/SingletonLock',
       ];
 
-      for (const lockFile of lockFiles) {
+      for (const lockFile of commonLockPaths) {
         const lockPath = path.join(sessionPath, lockFile);
         try {
           if (fs.existsSync(lockPath)) {
             this.logger.warn(`Removing Chromium lock file: ${lockPath}`);
-            fs.unlinkSync(lockPath);
+            try {
+              fs.chmodSync(lockPath, 0o666); // Make writable first
+              fs.unlinkSync(lockPath);
+            } catch (error: any) {
+              if (error.code !== 'ENOENT') {
+                this.logger.debug(
+                  `Could not remove lock file ${lockPath}: ${error.message}`,
+                );
+              }
+            }
           }
-        } catch (error: any) {
-          // Ignore errors if file doesn't exist or can't be deleted
-          if (error.code !== 'ENOENT') {
-            this.logger.debug(
-              `Could not remove lock file ${lockPath}: ${error.message}`,
-            );
-          }
+        } catch {
+          // Ignore errors
         }
       }
 
-      // Also check for lock files in Default directory
-      const defaultPath = path.join(sessionPath, 'Default');
-      if (fs.existsSync(defaultPath)) {
-        const defaultLockFiles = fs
-          .readdirSync(defaultPath)
-          .filter((file) => file.includes('lock') || file.includes('Lock'));
-        for (const lockFile of defaultLockFiles) {
-          const lockPath = path.join(defaultPath, lockFile);
-          try {
-            this.logger.warn(`Removing Chromium lock file: ${lockPath}`);
-            fs.unlinkSync(lockPath);
-          } catch (error: any) {
-            if (error.code !== 'ENOENT') {
-              this.logger.debug(
-                `Could not remove lock file ${lockPath}: ${error.message}`,
-              );
-            }
-          }
-        }
-      }
+      // Wait a bit to ensure file system operations complete
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      this.logger.log('Chromium lock file cleanup completed');
     } catch (error: any) {
       this.logger.warn(`Error cleaning up Chromium locks: ${error.message}`);
     }
@@ -349,6 +411,9 @@ export class WhatsAppService implements OnModuleInit {
 
       // Clean up Chromium lock files before initializing
       await this.cleanupChromiumLocks();
+
+      // Wait a bit longer to ensure any lingering processes are gone and file system is ready
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       // Reset state flags
       this.isClientReady = false;
