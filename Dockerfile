@@ -6,13 +6,17 @@ WORKDIR /app
 # Install build dependencies
 COPY package*.json ./
 COPY .npmrc ./
-RUN npm ci --legacy-peer-deps
+# Clean npm cache and install with cache cleanup
+RUN npm cache clean --force && \
+    npm ci --legacy-peer-deps && \
+    npm cache clean --force
 
 # Copy all source files
 COPY . .
 
 # Build NestJS project
-RUN npm run build
+RUN npm run build && \
+    npm cache clean --force
 
 # ---------- PRODUCTION STAGE ----------
 FROM node:22-slim
@@ -70,7 +74,10 @@ WORKDIR /app
 # Copy only package files & install production dependencies
 COPY package*.json ./
 COPY .npmrc ./
-RUN npm ci --omit=dev --legacy-peer-deps
+# Clean npm cache before and after install
+RUN npm cache clean --force && \
+    npm ci --omit=dev --legacy-peer-deps && \
+    npm cache clean --force
 
 # Copy build output from builder stage
 COPY --from=builder /app/dist ./dist
