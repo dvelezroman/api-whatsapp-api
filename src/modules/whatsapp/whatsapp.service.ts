@@ -13,6 +13,9 @@ export class WhatsAppService implements OnModuleInit {
   private isClientReady: boolean = false; // Track client readiness
   private isClientAuthenticated: boolean = false; // Track client authentication
   private webHelpersInjected: boolean = false; // Track if WhatsApp Web helpers are injected
+  private initializationAttempts: number = 0; // Track initialization attempts
+  private maxInitializationAttempts: number = 5; // Maximum retry attempts
+  private initializationRetryTimeout: NodeJS.Timeout | null = null; // Retry timeout reference
 
   // Webhook configuration
   private webhookConfig: {
@@ -182,54 +185,148 @@ export class WhatsAppService implements OnModuleInit {
     // Initialize webhook configuration from environment variables
     this.initializeWebhookFromEnv();
 
-    this.client = new Client({
-      authStrategy: new LocalAuth({ dataPath: './whatsapp-session' }),
-      puppeteer: {
-        executablePath:
-          process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--disable-ipc-flooding-protection',
-          '--disable-hang-monitor',
-          '--disable-prompt-on-repost',
-          '--disable-sync',
-          '--disable-translate',
-          '--disable-windows10-custom-titlebar',
-          '--metrics-recording-only',
-          '--no-default-browser-check',
-          '--safebrowsing-disable-auto-update',
-          '--enable-automation',
-          '--password-store=basic',
-          '--use-mock-keychain',
-        ],
-      },
-    });
+    // Start initialization with retry logic
+    this.initializeClientWithRetry();
+  }
 
+  private async initializeClientWithRetry() {
+    this.initializationAttempts++;
+
+    if (this.initializationAttempts > this.maxInitializationAttempts) {
+      this.logger.error(
+        `Failed to initialize WhatsApp client after ${this.maxInitializationAttempts} attempts. Please check the logs and restart the service.`,
+      );
+      return;
+    }
+
+    if (this.initializationAttempts > 1) {
+      const delay = Math.min(
+        1000 * Math.pow(2, this.initializationAttempts - 2),
+        30000,
+      ); // Exponential backoff, max 30s
+      this.logger.warn(
+        `Retrying WhatsApp client initialization (attempt ${this.initializationAttempts}/${this.maxInitializationAttempts}) in ${delay}ms...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    try {
+      // Clean up previous client if it exists
+      if (this.client) {
+        try {
+          await this.client.destroy();
+        } catch (destroyError) {
+          this.logger.warn(
+            `Error destroying previous client: ${destroyError.message}`,
+          );
+        }
+      }
+
+      // Reset state flags
+      this.isClientReady = false;
+      this.isClientAuthenticated = false;
+      this.webHelpersInjected = false;
+      this.qrCodeData = null;
+
+      this.client = new Client({
+        authStrategy: new LocalAuth({ dataPath: './whatsapp-session' }),
+        puppeteer: {
+          executablePath:
+            process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-ipc-flooding-protection',
+            '--disable-hang-monitor',
+            '--disable-prompt-on-repost',
+            '--disable-sync',
+            '--disable-translate',
+            '--disable-windows10-custom-titlebar',
+            '--metrics-recording-only',
+            '--no-default-browser-check',
+            '--safebrowsing-disable-auto-update',
+            '--enable-automation',
+            '--password-store=basic',
+            '--use-mock-keychain',
+            '--single-process', // Run in single process mode to avoid context issues
+            '--disable-extensions',
+            '--disable-plugins',
+          ],
+          headless: true,
+          timeout: 60000, // 60 second timeout
+          ignoreHTTPSErrors: true,
+        },
+      });
+
+      // Set up event handlers
+      this.setupClientEventHandlers();
+
+      // Initialize the client
+      await this.client.initialize();
+
+      // Reset attempts on successful initialization
+      this.initializationAttempts = 0;
+    } catch (error) {
+      this.logger.error(
+        `Error initializing WhatsApp client (attempt ${this.initializationAttempts}/${this.maxInitializationAttempts}): ${error.message}`,
+      );
+
+      // Check if it's a protocol error that we should retry
+      if (
+        error.message?.includes('Protocol error') ||
+        error.message?.includes('Execution context was destroyed') ||
+        error.message?.includes('Target closed') ||
+        error.message?.includes('Session closed')
+      ) {
+        this.logger.warn(
+          'Protocol error detected. This is usually temporary. Will retry...',
+        );
+        // Schedule retry
+        this.initializationRetryTimeout = setTimeout(() => {
+          this.initializeClientWithRetry();
+        }, 5000);
+      } else {
+        // For other errors, retry with exponential backoff
+        this.initializationRetryTimeout = setTimeout(
+          () => {
+            this.initializeClientWithRetry();
+          },
+          Math.min(1000 * Math.pow(2, this.initializationAttempts), 30000),
+        );
+      }
+    }
+  }
+
+  private setupClientEventHandlers() {
     this.client.on('qr', async (qr) => {
       this.logger.warn('QR Code received. Scan with your phone.');
 
-      // Save raw QR
-      this.qrCodeData = await QRCode.toDataURL(qr); // Convert to Base64 image
+      try {
+        // Save raw QR
+        this.qrCodeData = await QRCode.toDataURL(qr); // Convert to Base64 image
 
-      // Also log to terminal (optional)
-      qrcode.generate(qr, { small: true });
+        // Also log to terminal (optional)
+        qrcode.generate(qr, { small: true });
+      } catch (error) {
+        this.logger.error(`Error generating QR code: ${error.message}`);
+      }
     });
 
     this.client.on('ready', () => {
       this.logger.log('WhatsApp Client is ready!');
       this.qrCodeData = null; // No QR needed anymore
       this.isClientReady = true; // Mark client as ready
+      this.initializationAttempts = 0; // Reset attempts on success
     });
 
     this.client.on('authenticated', () => {
@@ -243,20 +340,59 @@ export class WhatsAppService implements OnModuleInit {
       this.isClientAuthenticated = false; // Mark client as not authenticated
     });
 
+    this.client.on('disconnected', (reason) => {
+      const reasonStr = String(reason);
+      this.logger.warn(`WhatsApp Client disconnected: ${reasonStr}`);
+      this.isClientReady = false;
+      this.isClientAuthenticated = false;
+      this.webHelpersInjected = false;
+
+      // Attempt to reconnect if it was an unexpected disconnect
+      if (
+        reasonStr === 'NAVIGATION' ||
+        reasonStr === 'CONNECTION_CLOSED' ||
+        reasonStr.includes('CLOSED')
+      ) {
+        this.logger.log('Attempting to reconnect...');
+        setTimeout(() => {
+          this.initializeClientWithRetry();
+        }, 5000);
+      }
+    });
+
+    // Handle protocol errors and other errors
+    this.client.on('error', (error) => {
+      this.logger.error(`WhatsApp Client error: ${error.message}`);
+
+      // Check if it's a protocol error that requires reinitialization
+      if (
+        error.message?.includes('Protocol error') ||
+        error.message?.includes('Execution context was destroyed') ||
+        error.message?.includes('Target closed') ||
+        error.message?.includes('Session closed')
+      ) {
+        this.logger.warn(
+          'Protocol error detected. Will attempt to reinitialize...',
+        );
+        this.isClientReady = false;
+        this.webHelpersInjected = false;
+
+        // Clear any existing retry timeout
+        if (this.initializationRetryTimeout) {
+          clearTimeout(this.initializationRetryTimeout);
+        }
+
+        // Retry initialization after a delay
+        this.initializationRetryTimeout = setTimeout(() => {
+          this.initializeClientWithRetry();
+        }, 10000);
+      }
+    });
+
     // Listen for incoming messages
     this.client.on('message', async (message) => {
       await this.handleIncomingMessage(message);
     });
-
-    this.client.initialize();
-
-    // Start automatic cache cleanup every 10 minutes
-    setInterval(
-      () => {
-        this.cleanExpiredCache();
-      },
-      30 * 60 * 1000,
-    ); // 10 minutes
   }
 
   private async handleIncomingMessage(message: any) {
@@ -679,19 +815,32 @@ export class WhatsAppService implements OnModuleInit {
   async restartClient(): Promise<void> {
     this.logger.log('Restarting WhatsApp client...');
 
+    // Clear any pending retry timeout
+    if (this.initializationRetryTimeout) {
+      clearTimeout(this.initializationRetryTimeout);
+      this.initializationRetryTimeout = null;
+    }
+
     // Reset all state flags
     this.isClientReady = false;
     this.isClientAuthenticated = false;
     this.webHelpersInjected = false;
     this.qrCodeData = null;
+    this.initializationAttempts = 0; // Reset attempts counter
 
     // Destroy existing client
     if (this.client) {
-      await this.client.destroy();
+      try {
+        await this.client.destroy();
+      } catch (error) {
+        this.logger.warn(
+          `Error destroying client during restart: ${error.message}`,
+        );
+      }
     }
 
-    // Reinitialize client
-    this.onModuleInit();
+    // Reinitialize client with retry logic
+    this.initializeClientWithRetry();
   }
 
   async getAllGroups() {
