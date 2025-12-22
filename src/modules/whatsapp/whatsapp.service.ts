@@ -159,15 +159,38 @@ export class WhatsAppService implements OnModuleInit {
         'SingletonLock',
         'lockfile',
         '.lock',
+        'SingletonCookie',
         'Default/SingletonLock',
         'Default/lockfile',
         'Default/.lock',
         'Default/SingletonCookie',
+        'Default/Default/SingletonLock',
         'Session Storage/SingletonLock',
         'Local Storage/SingletonLock',
         'IndexedDB/SingletonLock',
         'GPUCache/SingletonLock',
+        'Code Cache/SingletonLock',
       ];
+
+      // Also find and remove any file containing "lock" in the name
+      try {
+        const findLockFiles = await execAsync(
+          `find "${sessionPath}" -type f -iname "*lock*" -o -iname "*singleton*" 2>/dev/null || true`,
+        );
+        const foundLocks = findLockFiles.stdout
+          .split('\n')
+          .filter((line) => line.trim() && fs.existsSync(line.trim()));
+        for (const lockFile of foundLocks) {
+          try {
+            this.logger.warn(`Removing found lock file: ${lockFile.trim()}`);
+            await execAsync(`rm -f "${lockFile.trim()}"`);
+          } catch {
+            // Ignore
+          }
+        }
+      } catch {
+        // Ignore errors
+      }
 
       // Try multiple times to ensure locks are removed
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -209,8 +232,27 @@ export class WhatsAppService implements OnModuleInit {
         }
       }
 
-      // Wait longer to ensure file system operations complete
+      // Force remove any remaining lock files using find and rm
+      try {
+        await execAsync(
+          `find "${sessionPath}" -type f \\( -name "*lock*" -o -name "*Lock*" -o -name "*singleton*" -o -name "*Singleton*" \\) -delete 2>/dev/null || true`,
+        );
+        await execAsync(
+          `find "${sessionPath}" -type d -name "*lock*" -exec rm -rf {} + 2>/dev/null || true`,
+        );
+      } catch {
+        // Ignore errors
+      }
+
+      // Wait longer to ensure file system operations complete and sync
       await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Force filesystem sync
+      try {
+        await execAsync('sync');
+      } catch {
+        // Ignore if sync command not available
+      }
 
       this.logger.log('Chromium lock file cleanup completed');
     } catch (error: any) {
@@ -510,6 +552,26 @@ export class WhatsAppService implements OnModuleInit {
             '--disable-background-networking',
             '--disable-default-apps',
             '--disable-site-isolation-trials', // Disable site isolation to allow script injection
+            '--disable-breakpad', // Disable crash reporting
+            '--disable-component-update', // Disable component updates
+            '--disable-background-downloads', // Disable background downloads
+            '--disable-client-side-phishing-detection', // Disable phishing detection
+            '--disable-datasaver-prompt', // Disable data saver prompt
+            '--disable-domain-reliability', // Disable domain reliability
+            '--disable-features=TranslateUI', // Disable translate UI
+            '--disable-ipc-flooding-protection', // Already present but keep for emphasis
+            '--disable-notifications', // Disable notifications
+            '--disable-reading-from-canvas', // Disable canvas reading
+            '--disable-remote-fonts', // Disable remote fonts
+            '--disable-speech-api', // Disable speech API
+            '--disable-suggestions-ui', // Disable suggestions UI
+            '--disable-web-resources', // Disable web resources
+            '--force-color-profile=srgb', // Force color profile
+            '--hide-scrollbars', // Hide scrollbars
+            '--mute-audio', // Mute audio
+            '--no-pings', // Disable pings
+            '--noerrdialogs', // No error dialogs
+            '--disable-infobars', // Disable info bars
           ],
           headless: true,
           timeout: 60000, // 60 second timeout
