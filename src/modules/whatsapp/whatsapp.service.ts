@@ -443,11 +443,14 @@ export class WhatsAppService implements OnModuleInit {
     this.webHelpersInjected = true;
   }
 
-  onModuleInit() {
+  async onModuleInit() {
     this.logger.log('Initializing WhatsApp Client...');
 
     // Initialize webhook configuration from environment variables
     this.initializeWebhookFromEnv();
+
+    // ✅ REGLA DE ORO: Limpiar locks de Chromium al iniciar el módulo
+    await this.cleanupChromiumLocks();
 
     // Start initialization with retry logic
     this.initializeClientWithRetry();
@@ -516,11 +519,32 @@ export class WhatsAppService implements OnModuleInit {
       this.webHelpersInjected = false;
       this.qrCodeData = null;
 
+      // ✅ REGLA DE ORO: Directorio dedicado para sesión y perfil de Chromium
+      const sessionPath = path.resolve('./whatsapp-session');
+      const chromiumProfilePath = path.join(sessionPath, 'chromium-profile');
+
+      // ✅ REGLA DE ORO: Crear directorios si no existen
+      if (!fs.existsSync(sessionPath)) {
+        fs.mkdirSync(sessionPath, { recursive: true });
+      }
+      if (!fs.existsSync(chromiumProfilePath)) {
+        fs.mkdirSync(chromiumProfilePath, { recursive: true });
+      }
+
+      // ✅ REGLA DE ORO: Log para validar userDataDir configurado
+      this.logger.log(
+        `Using dedicated Chromium profile: ${chromiumProfilePath}`,
+      );
+      this.logger.log(`Using WhatsApp session path: ${sessionPath}`);
+
       this.client = new Client({
-        authStrategy: new LocalAuth({ dataPath: './whatsapp-session' }),
+        authStrategy: new LocalAuth({ dataPath: sessionPath }),
         puppeteer: {
           executablePath:
             process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+          // ✅ REGLA DE ORO: Forzar perfil de Chromium explícitamente
+          // Esto evita que Chromium use el perfil default (/root/.config/chromium)
+          userDataDir: chromiumProfilePath,
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -1159,12 +1183,23 @@ export class WhatsAppService implements OnModuleInit {
     if (this.client) {
       try {
         await this.client.destroy();
-      } catch (error) {
+      } catch (error: any) {
         this.logger.warn(
           `Error destroying client during restart: ${error.message}`,
         );
+      } finally {
+        this.client = null as any;
       }
     }
+
+    // Kill any lingering Chromium processes
+    await this.killChromiumProcesses();
+
+    // Clean up Chromium lock files before restarting
+    await this.cleanupChromiumLocks();
+
+    // Wait a bit before reinitializing
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Reinitialize client with retry logic
     this.initializeClientWithRetry();

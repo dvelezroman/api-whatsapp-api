@@ -82,8 +82,17 @@ RUN npm cache clean --force && \
 # Copy build output from builder stage
 COPY --from=builder /app/dist ./dist
 
+# ✅ REGLA DE ORO: Copiar entrypoint script que limpia Singleton* al iniciar
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Create empty folder for WhatsApp session (will be mounted as a volume)
 RUN mkdir -p /app/whatsapp-session
+
+# ✅ REGLA DE ORO: Eliminar perfil default de Chromium (una sola vez)
+# Esto evita que Chromium quede "enganchado" al perfil default
+RUN rm -rf /root/.config/chromium 2>/dev/null || true && \
+    rm -rf /root/.cache/chromium 2>/dev/null || true
 
 EXPOSE 3005
 
@@ -91,5 +100,7 @@ EXPOSE 3005
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:3005/health || exit 1
 
+# ✅ REGLA DE ORO: Usar entrypoint que limpia locks al iniciar
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/main"]
 
