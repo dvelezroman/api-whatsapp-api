@@ -537,6 +537,7 @@ export class WhatsAppService implements OnModuleInit {
         'LocalAuth will manage Chromium profile automatically (not using default /root/.config/chromium)',
       );
 
+      this.logger.log('Creating WhatsApp Client instance...');
       this.client = new Client({
         authStrategy: new LocalAuth({ dataPath: sessionPath }),
         puppeteer: {
@@ -602,11 +603,15 @@ export class WhatsAppService implements OnModuleInit {
         },
       });
 
-      // Set up event handlers
+      // Set up event handlers BEFORE initializing
       this.setupClientEventHandlers();
 
       // Initialize the client
+      this.logger.log('Starting WhatsApp client initialization...');
       await this.client.initialize();
+      this.logger.log(
+        'WhatsApp client initialization completed (waiting for QR or authentication)...',
+      );
 
       // Reset attempts on successful initialization
       this.initializationAttempts = 0;
@@ -652,12 +657,20 @@ export class WhatsAppService implements OnModuleInit {
   }
 
   private setupClientEventHandlers() {
+    // Log when client starts loading
+    this.client.on('loading_screen', (percent, message) => {
+      this.logger.log(
+        `WhatsApp loading: ${percent}% - ${message || 'Loading...'}`,
+      );
+    });
+
     this.client.on('qr', async (qr) => {
       this.logger.warn('QR Code received. Scan with your phone.');
 
       try {
         // Save raw QR
         this.qrCodeData = await QRCode.toDataURL(qr); // Convert to Base64 image
+        this.logger.log('QR Code generated and stored successfully');
 
         // Also log to terminal (optional)
         qrcode.generate(qr, { small: true });
@@ -676,9 +689,18 @@ export class WhatsAppService implements OnModuleInit {
       await this.bypassCSP();
     });
 
+    this.client.on('authenticating', () => {
+      this.logger.log(
+        'WhatsApp Client is authenticating (using saved session)...',
+      );
+      // Clear QR code if we're authenticating (means we have a saved session)
+      this.qrCodeData = null;
+    });
+
     this.client.on('authenticated', async () => {
       this.logger.log('WhatsApp Client authenticated successfully!');
       this.isClientAuthenticated = true; // Mark client as authenticated
+      this.qrCodeData = null; // Clear QR code after authentication
 
       // Try to bypass CSP early after authentication
       await this.bypassCSP();
@@ -688,6 +710,7 @@ export class WhatsAppService implements OnModuleInit {
       this.logger.error('Authentication failed:', msg);
       this.isClientReady = false; // Mark client as not ready
       this.isClientAuthenticated = false; // Mark client as not authenticated
+      this.qrCodeData = null; // Clear QR code on auth failure
     });
 
     this.client.on('disconnected', (reason) => {
@@ -1069,9 +1092,35 @@ export class WhatsAppService implements OnModuleInit {
 
   getQRCode() {
     if (!this.qrCodeData) {
+      // Provide more diagnostic information
+      const hasClient = !!this.client;
+      const isReady = this.isClientReady;
+      const isAuthenticated = this.isClientAuthenticated;
+      const attempts = this.initializationAttempts;
+
+      let message = 'No QR code available at this moment';
+      if (!hasClient) {
+        message += ' (Client not initialized)';
+      } else if (isReady) {
+        message = 'Client is already connected (no QR needed)';
+      } else if (isAuthenticated) {
+        message = 'Client is authenticated, waiting to be ready';
+      } else if (attempts > this.maxInitializationAttempts) {
+        message = 'Client initialization failed after maximum attempts';
+      } else {
+        message += ` (Initialization in progress, attempt ${attempts}/${this.maxInitializationAttempts})`;
+      }
+
       return {
         status: 'no_qr',
-        message: 'No QR code available at this moment',
+        message,
+        diagnostic: {
+          hasClient,
+          isReady,
+          isAuthenticated,
+          attempts,
+          maxAttempts: this.maxInitializationAttempts,
+        },
       };
     }
     return { status: 'qr', qr: this.qrCodeData };
