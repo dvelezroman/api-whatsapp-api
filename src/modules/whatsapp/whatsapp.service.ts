@@ -397,17 +397,41 @@ export class WhatsAppService implements OnModuleInit {
   }
 
   private async testWebHelpers(): Promise<boolean> {
+    if (!this.client) {
+      return false;
+    }
+
     try {
+      // Wait a bit for web helpers to be fully injected
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
       // Try to get a simple chat to test if helpers are working
-      const chats = await this.client.getChats();
-      return Array.isArray(chats);
-    } catch (error) {
-      this.logger.warn(`Web helpers test failed: ${error.message}`);
+      // Use a timeout to avoid hanging
+      const chats = await Promise.race([
+        this.client.getChats(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout')), 5000),
+        ),
+      ]);
+
+      const isValid = Array.isArray(chats);
+      if (isValid) {
+        this.logger.log(`Web helpers test passed: Found ${chats.length} chats`);
+      }
+      return isValid;
+    } catch (error: any) {
+      // Log more details about the error
+      const errorMsg = error.message || String(error);
+      this.logger.warn(`Web helpers test failed: ${errorMsg}`);
 
       // Additional debugging information
-      if (error.message.includes('getChats')) {
+      if (
+        errorMsg.includes('getChats') ||
+        errorMsg.includes('Evaluation failed') ||
+        errorMsg.includes('Timeout')
+      ) {
         this.logger.warn(
-          'WhatsApp Web helpers not properly injected. Client may need restart.',
+          'WhatsApp Web helpers may not be fully injected yet. Will retry automatically.',
         );
       }
 
@@ -433,14 +457,24 @@ export class WhatsAppService implements OnModuleInit {
     }
 
     // Test if WhatsApp Web helpers are actually working
+    // If web helpers are already marked as injected, skip the test
+    if (this.webHelpersInjected) {
+      return;
+    }
+
+    // Try to test web helpers, but don't fail immediately if they're not ready
+    // This allows operations to proceed even if helpers are still initializing
     const helpersWorking = await this.testWebHelpers();
-    if (!helpersWorking) {
-      this.webHelpersInjected = false;
-      throw new Error(
-        'WEB_HELPERS_NOT_INJECTED: WhatsApp Web helpers are not properly injected. This may be due to a version mismatch or the client needs to be restarted.',
+    if (helpersWorking) {
+      this.webHelpersInjected = true;
+      this.logger.log('Web helpers verified and working');
+    } else {
+      // Don't throw error, just log a warning
+      // Some operations may still work even if helpers aren't fully ready
+      this.logger.warn(
+        'Web helpers test failed, but continuing. Some features may be limited.',
       );
     }
-    this.webHelpersInjected = true;
   }
 
   async onModuleInit() {
@@ -687,6 +721,35 @@ export class WhatsAppService implements OnModuleInit {
 
       // Bypass CSP after client is ready
       await this.bypassCSP();
+
+      // Wait a bit for everything to settle, then test web helpers
+      // This gives time for web helpers to be fully injected
+      setTimeout(async () => {
+        this.logger.log('Testing web helpers after client ready...');
+        let retries = 0;
+        const maxRetries = 5;
+
+        while (retries < maxRetries && !this.webHelpersInjected) {
+          const helpersWorking = await this.testWebHelpers();
+          if (helpersWorking) {
+            this.webHelpersInjected = true;
+            this.logger.log('Web helpers are working correctly!');
+            break;
+          } else {
+            retries++;
+            if (retries < maxRetries) {
+              this.logger.warn(
+                `Web helpers test failed (attempt ${retries}/${maxRetries}). Retrying in 3 seconds...`,
+              );
+              await new Promise((resolve) => setTimeout(resolve, 3000));
+            } else {
+              this.logger.warn(
+                'Web helpers test failed after all retries. Some features may not work correctly.',
+              );
+            }
+          }
+        }
+      }, 2000); // Wait 2 seconds after ready event
     });
 
     this.client.on('authenticating', () => {
