@@ -14,24 +14,35 @@
 **Implementado en:** `src/modules/whatsapp/whatsapp.service.ts`
 
 ```typescript
-// ✅ REGLA DE ORO: Directorio dedicado para sesión y perfil de Chromium
+// ✅ REGLA DE ORO: Directorio dedicado para sesión de WhatsApp
+// LocalAuth maneja su propio userDataDir automáticamente
+// NO podemos especificar userDataDir en Puppeteer (incompatible con LocalAuth)
 const sessionPath = path.resolve('./whatsapp-session');
-const chromiumProfilePath = path.join(sessionPath, 'chromium-profile');
 
-// ✅ REGLA DE ORO: Forzar perfil de Chromium explícitamente
-puppeteer: {
-  userDataDir: chromiumProfilePath, // ← OBLIGATORIO
-  // ...
-}
+this.client = new Client({
+  authStrategy: new LocalAuth({ dataPath: sessionPath }),
+  puppeteer: {
+    // ⚠️ NO usar userDataDir aquí - LocalAuth lo maneja automáticamente
+    // ⚠️ NO usar --user-data-dir como argumento - LocalAuth lo gestiona internamente
+    args: [
+      // ... otros argumentos
+    ],
+  },
+});
 ```
 
 **Por qué:**  
-`LocalAuth` no controla el perfil de Chromium; sin esto usa el perfil default (`/root/.config/chromium`).
+`LocalAuth` gestiona automáticamente el `userDataDir` de Chromium dentro de `dataPath`. Si especificamos `userDataDir` en Puppeteer, obtenemos el error: `LocalAuth is not compatible with a user-supplied userDataDir`.
+
+**Cómo funciona:**
+- `LocalAuth` crea el perfil de Chromium dentro de `sessionPath/.wwebjs_auth` automáticamente
+- Esto evita usar el perfil default (`/root/.config/chromium`)
+- El perfil default se elimina en el Dockerfile para evitar conflictos
 
 **Validación en logs:**
 ```
-Using dedicated Chromium profile: /app/whatsapp-session/chromium-profile
 Using WhatsApp session path: /app/whatsapp-session
+LocalAuth will manage Chromium profile automatically (not using default /root/.config/chromium)
 ```
 
 ---
@@ -41,10 +52,10 @@ Using WhatsApp session path: /app/whatsapp-session
 **Implementado en:** `src/modules/whatsapp/whatsapp.service.ts`
 
 - Sesión WhatsApp: `/app/whatsapp-session`
-- Perfil Chromium: `/app/whatsapp-session/chromium-profile`
+- Perfil Chromium: `/app/whatsapp-session/.wwebjs_auth` (creado automáticamente por `LocalAuth`)
 
 **Por qué:**  
-Evita colisiones y locks entre reinicios.
+Evita colisiones y locks entre reinicios. `LocalAuth` crea el perfil de Chromium dentro del directorio de sesión automáticamente.
 
 ---
 
@@ -183,10 +194,10 @@ Garantiza arranque limpio (requiere nuevo QR).
 
 ## 🎯 Reglas de Oro Implementadas
 
-- ✅ **Nunca usar el perfil default de Chromium** → `userDataDir` explícito
-- ✅ **Nunca ejecutar más de una instancia** → `replicas: 1`
-- ✅ **Siempre usar `puppeteer.userDataDir`** → Configurado en código
-- ✅ **Siempre volumen persistente** → Montado en `docker-compose.yml`
+- ✅ **Nunca usar el perfil default de Chromium** → Eliminado en Dockerfile, `LocalAuth` usa directorio dedicado
+- ✅ **Nunca ejecutar más de una instancia** → Ya estaba (`replicas: 1`)
+- ✅ **NO usar `puppeteer.userDataDir` con `LocalAuth`** → `LocalAuth` lo maneja automáticamente
+- ✅ **Siempre volumen persistente** → Ya estaba montado
 - ✅ **Limpiar `Singleton*` al iniciar** → Entrypoint + `onModuleInit()`
 
 ---
@@ -195,14 +206,14 @@ Garantiza arranque limpio (requiere nuevo QR).
 
 Antes de cada deployment, verificar:
 
-- [x] `userDataDir` configurado explícitamente
+- [x] `LocalAuth` configurado con `dataPath` (NO usar `userDataDir` en Puppeteer)
 - [x] Perfil default de Chromium eliminado en Dockerfile
 - [x] Entrypoint limpia Singleton* al iniciar
 - [x] `cleanupChromiumLocks()` ejecutado en `onModuleInit()`
 - [x] Solo 1 instancia del contenedor (`replicas: 1`)
 - [x] Volumen `whatsapp-session` montado correctamente
 - [x] Usando `docker-compose stop` (no `down`)
-- [x] Logs validan `userDataDir` configurado
+- [x] Logs validan que `LocalAuth` maneja el perfil automáticamente
 
 ---
 
@@ -236,9 +247,9 @@ Antes de cada deployment, verificar:
 
 1. **Verificar logs:**
    ```bash
-   docker compose logs whatsapp-api | grep "Using dedicated Chromium profile"
+   docker compose logs whatsapp-api | grep "LocalAuth will manage Chromium profile"
    ```
-   Debe mostrar: `/app/whatsapp-session/chromium-profile`
+   Debe mostrar: `LocalAuth will manage Chromium profile automatically (not using default /root/.config/chromium)`
 
 2. **Verificar que no hay perfil default:**
    ```bash
@@ -246,7 +257,13 @@ Antes de cada deployment, verificar:
    ```
    No debe existir.
 
-3. **Forzar limpieza:**
+3. **Verificar que LocalAuth creó el perfil:**
+   ```bash
+   docker exec whatsapp-api ls -la /app/whatsapp-session/.wwebjs_auth
+   ```
+   Debe existir (creado por `LocalAuth`).
+
+4. **Forzar limpieza:**
    ```bash
    ./clean-locks.sh
    docker compose restart
@@ -254,12 +271,18 @@ Antes de cada deployment, verificar:
 
 ### Si Chromium sigue usando perfil default:
 
-1. **Verificar configuración:**
+1. **Verificar que NO hay userDataDir en código:**
    ```bash
-   docker exec whatsapp-api cat /app/dist/modules/whatsapp/whatsapp.service.js | grep userDataDir
+   docker exec whatsapp-api grep -r "userDataDir" /app/dist/modules/whatsapp/whatsapp.service.js
+   ```
+   No debe aparecer `userDataDir` en la configuración de Puppeteer.
+
+2. **Verificar que LocalAuth está configurado:**
+   ```bash
+   docker compose logs whatsapp-api | grep "LocalAuth"
    ```
 
-2. **Reset total:**
+3. **Reset total:**
    ```bash
    ./reset-total.sh
    ```
@@ -268,22 +291,33 @@ Antes de cada deployment, verificar:
 
 ## 📊 Estado Final Esperado
 
-✅ Chromium aislado en `/app/whatsapp-session/chromium-profile`  
+✅ Chromium aislado en `/app/whatsapp-session/.wwebjs_auth` (gestionado por `LocalAuth`)  
 ✅ Sesión estable en `/app/whatsapp-session`  
 ✅ Reinicios seguros sin locks  
 ✅ Error `SingletonLock` eliminado  
-✅ Logs validan configuración correcta
+✅ Logs validan que `LocalAuth` maneja el perfil automáticamente  
+✅ Sin error `LocalAuth is not compatible with a user-supplied userDataDir`
 
 ---
 
 ## 📝 Archivos Modificados
 
-- ✅ `src/modules/whatsapp/whatsapp.service.ts` - `userDataDir` + logs + cleanup
+- ✅ `src/modules/whatsapp/whatsapp.service.ts` - `LocalAuth` con `dataPath` (SIN `userDataDir`) + logs + cleanup
 - ✅ `Dockerfile` - Eliminación perfil default + entrypoint
 - ✅ `docker-entrypoint.sh` - Limpieza Singleton* al iniciar
 - ✅ `docker-compose.yml` - Ya tenía `replicas: 1` y volumen
 - ✅ `deploy.sh` - Ya usaba `stop` (sin cambios)
 - ✅ `reset-total.sh` - Script nuevo para reset completo
+
+## ⚠️ Nota Importante sobre `LocalAuth`
+
+**CRÍTICO:** `LocalAuth` NO es compatible con `userDataDir` explícito en Puppeteer.
+
+- ❌ **NO hacer:** `puppeteer: { userDataDir: '...' }`
+- ❌ **NO hacer:** `args: ['--user-data-dir=...']`
+- ✅ **Hacer:** `authStrategy: new LocalAuth({ dataPath: './whatsapp-session' })`
+
+`LocalAuth` gestiona automáticamente el `userDataDir` de Chromium dentro de `dataPath/.wwebjs_auth`, evitando el uso del perfil default (`/root/.config/chromium`).
 
 ---
 

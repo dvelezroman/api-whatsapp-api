@@ -519,32 +519,31 @@ export class WhatsAppService implements OnModuleInit {
       this.webHelpersInjected = false;
       this.qrCodeData = null;
 
-      // ✅ REGLA DE ORO: Directorio dedicado para sesión y perfil de Chromium
+      // ✅ REGLA DE ORO: Directorio dedicado para sesión de WhatsApp
+      // LocalAuth maneja su propio userDataDir automáticamente
+      // NO podemos especificar userDataDir en Puppeteer (incompatible con LocalAuth)
       const sessionPath = path.resolve('./whatsapp-session');
-      const chromiumProfilePath = path.join(sessionPath, 'chromium-profile');
 
-      // ✅ REGLA DE ORO: Crear directorios si no existen
+      // ✅ REGLA DE ORO: Crear directorio si no existe
       if (!fs.existsSync(sessionPath)) {
         fs.mkdirSync(sessionPath, { recursive: true });
       }
-      if (!fs.existsSync(chromiumProfilePath)) {
-        fs.mkdirSync(chromiumProfilePath, { recursive: true });
-      }
 
-      // ✅ REGLA DE ORO: Log para validar userDataDir configurado
-      this.logger.log(
-        `Using dedicated Chromium profile: ${chromiumProfilePath}`,
-      );
+      // ✅ REGLA DE ORO: Log para validar configuración
+      // LocalAuth creará el perfil de Chromium dentro de sessionPath automáticamente
+      // Esto evita usar el perfil default (/root/.config/chromium)
       this.logger.log(`Using WhatsApp session path: ${sessionPath}`);
+      this.logger.log(
+        'LocalAuth will manage Chromium profile automatically (not using default /root/.config/chromium)',
+      );
 
       this.client = new Client({
         authStrategy: new LocalAuth({ dataPath: sessionPath }),
         puppeteer: {
           executablePath:
             process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-          // ✅ REGLA DE ORO: Forzar perfil de Chromium explícitamente
-          // Esto evita que Chromium use el perfil default (/root/.config/chromium)
-          userDataDir: chromiumProfilePath,
+          // ⚠️ NO usar userDataDir aquí - LocalAuth lo maneja automáticamente
+          // ⚠️ NO usar --user-data-dir como argumento - LocalAuth lo gestiona internamente
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',

@@ -57,5 +57,5 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # WhatsApp session files
 whatsapp-session/session/
-whatsapp-session/chromium-profile/
+whatsapp-session/.wwebjs_auth/
 whatsapp-session-backup-*/
