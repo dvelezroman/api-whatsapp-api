@@ -477,6 +477,45 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
+  /**
+   * Safely cleanup client without throwing errors
+   */
+  private async cleanupClientSafely(): Promise<void> {
+    try {
+      if (this.client) {
+        const clientAny = this.client as any;
+        // Check if client has a valid puppeteer instance before destroying
+        if (clientAny.pupPage && !clientAny.pupPage.isClosed()) {
+          try {
+            await this.client.destroy();
+            this.logger.log('Client destroyed safely');
+          } catch (destroyError: any) {
+            // Ignore errors about already destroyed clients
+            if (
+              !destroyError.message?.includes('Target closed') &&
+              !destroyError.message?.includes('Session closed') &&
+              !destroyError.message?.includes(
+                'Execution context was destroyed',
+              ) &&
+              !destroyError.message?.includes('Cannot read properties of null')
+            ) {
+              this.logger.warn(
+                `Error destroying client: ${destroyError.message}`,
+              );
+            }
+          }
+        }
+      }
+      this.client = null;
+      this.isClientReady = false;
+      this.isClientAuthenticated = false;
+      this.webHelpersInjected = false;
+      this.qrCodeData = null;
+    } catch (error: any) {
+      this.logger.warn(`Error during client cleanup: ${error.message}`);
+    }
+  }
+
   async onModuleInit() {
     this.logger.log('Initializing WhatsApp Client...');
 
@@ -485,6 +524,28 @@ export class WhatsAppService implements OnModuleInit {
 
     // ✅ REGLA DE ORO: Limpiar locks de Chromium al iniciar el módulo
     await this.cleanupChromiumLocks();
+
+    // Set up global error handler to prevent process crashes
+    process.on('uncaughtException', (error: Error) => {
+      if (
+        error.message?.includes('Execution context was destroyed') ||
+        error.message?.includes('Target closed') ||
+        error.message?.includes('Session closed')
+      ) {
+        this.logger.warn(
+          `Uncaught error (likely from destroyed context): ${error.message}. Will attempt to reinitialize...`,
+        );
+        // Don't crash, just reinitialize
+        this.cleanupClientSafely().then(() => {
+          setTimeout(() => {
+            this.initializeClientWithRetry();
+          }, 5000);
+        });
+      } else {
+        // For other uncaught errors, log and let it crash (or handle as needed)
+        this.logger.error(`Uncaught exception: ${error.message}`, error.stack);
+      }
+    });
 
     // Start initialization with retry logic
     this.initializeClientWithRetry();
@@ -714,42 +775,100 @@ export class WhatsAppService implements OnModuleInit {
     });
 
     this.client.on('ready', async () => {
-      this.logger.log('WhatsApp Client is ready!');
-      this.qrCodeData = null; // No QR needed anymore
-      this.isClientReady = true; // Mark client as ready
-      this.initializationAttempts = 0; // Reset attempts on success
+      // Check if client still exists and is valid before proceeding
+      if (!this.client) {
+        this.logger.warn(
+          'Ready event received but client is null, ignoring...',
+        );
+        return;
+      }
 
-      // Bypass CSP after client is ready
-      await this.bypassCSP();
+      try {
+        this.logger.log('WhatsApp Client is ready!');
+        this.qrCodeData = null; // No QR needed anymore
+        this.isClientReady = true; // Mark client as ready
+        this.initializationAttempts = 0; // Reset attempts on success
 
-      // Wait a bit for everything to settle, then test web helpers
-      // This gives time for web helpers to be fully injected
-      setTimeout(async () => {
-        this.logger.log('Testing web helpers after client ready...');
-        let retries = 0;
-        const maxRetries = 5;
-
-        while (retries < maxRetries && !this.webHelpersInjected) {
-          const helpersWorking = await this.testWebHelpers();
-          if (helpersWorking) {
-            this.webHelpersInjected = true;
-            this.logger.log('Web helpers are working correctly!');
-            break;
-          } else {
-            retries++;
-            if (retries < maxRetries) {
-              this.logger.warn(
-                `Web helpers test failed (attempt ${retries}/${maxRetries}). Retrying in 3 seconds...`,
-              );
-              await new Promise((resolve) => setTimeout(resolve, 3000));
-            } else {
-              this.logger.warn(
-                'Web helpers test failed after all retries. Some features may not work correctly.',
-              );
-            }
+        // Bypass CSP after client is ready (with error handling)
+        try {
+          await this.bypassCSP();
+        } catch (cspError: any) {
+          // Don't fail if CSP bypass fails
+          if (
+            !cspError.message?.includes('Execution context was destroyed') &&
+            !cspError.message?.includes('Target closed')
+          ) {
+            this.logger.warn(`CSP bypass failed: ${cspError.message}`);
           }
         }
-      }, 2000); // Wait 2 seconds after ready event
+
+        // Wait a bit for everything to settle, then test web helpers
+        // This gives time for web helpers to be fully injected
+        setTimeout(async () => {
+          // Check again if client still exists
+          if (!this.client || !this.isClientReady) {
+            this.logger.warn(
+              'Client no longer valid when testing web helpers, skipping...',
+            );
+            return;
+          }
+
+          try {
+            this.logger.log('Testing web helpers after client ready...');
+            let retries = 0;
+            const maxRetries = 5;
+
+            while (retries < maxRetries && !this.webHelpersInjected) {
+              // Check client validity before each test
+              if (!this.client || !this.isClientReady) {
+                this.logger.warn(
+                  'Client became invalid during web helpers test',
+                );
+                break;
+              }
+
+              const helpersWorking = await this.testWebHelpers();
+              if (helpersWorking) {
+                this.webHelpersInjected = true;
+                this.logger.log('Web helpers are working correctly!');
+                break;
+              } else {
+                retries++;
+                if (retries < maxRetries) {
+                  this.logger.warn(
+                    `Web helpers test failed (attempt ${retries}/${maxRetries}). Retrying in 3 seconds...`,
+                  );
+                  await new Promise((resolve) => setTimeout(resolve, 3000));
+                } else {
+                  this.logger.warn(
+                    'Web helpers test failed after all retries. Some features may not work correctly.',
+                  );
+                }
+              }
+            }
+          } catch (error: any) {
+            // Don't let errors in web helpers test crash the system
+            if (
+              !error.message?.includes('Execution context was destroyed') &&
+              !error.message?.includes('Target closed')
+            ) {
+              this.logger.warn(`Error testing web helpers: ${error.message}`);
+            }
+          }
+        }, 2000); // Wait 2 seconds after ready event
+      } catch (error: any) {
+        // Catch any errors in the ready handler
+        if (
+          error.message?.includes('Execution context was destroyed') ||
+          error.message?.includes('Target closed')
+        ) {
+          this.logger.warn(
+            `Context destroyed during ready event: ${error.message}`,
+          );
+        } else {
+          this.logger.error(`Error in ready event handler: ${error.message}`);
+        }
+      }
     });
 
     this.client.on('authenticating', () => {
@@ -782,9 +901,30 @@ export class WhatsAppService implements OnModuleInit {
       this.isClientReady = false;
       this.isClientAuthenticated = false;
       this.webHelpersInjected = false;
+      this.qrCodeData = null;
 
-      // Attempt to reconnect if it was an unexpected disconnect
-      if (
+      // Handle LOGOUT specifically - session was closed, need to clean up and reinitialize
+      if (reasonStr === 'LOGOUT') {
+        this.logger.warn(
+          'WhatsApp session was logged out. This may require a new QR code scan.',
+        );
+
+        // Clear any existing retry timeout
+        if (this.initializationRetryTimeout) {
+          clearTimeout(this.initializationRetryTimeout);
+          this.initializationRetryTimeout = null;
+        }
+
+        // Clean up the client properly before reinitializing
+        this.cleanupClientSafely().then(() => {
+          // Wait a bit before reinitializing to allow cleanup to complete
+          setTimeout(() => {
+            this.logger.log('Reinitializing after LOGOUT...');
+            this.initializeClientWithRetry();
+          }, 3000);
+        });
+      } else if (
+        // Attempt to reconnect if it was an unexpected disconnect
         reasonStr === 'NAVIGATION' ||
         reasonStr === 'CONNECTION_CLOSED' ||
         reasonStr.includes('CLOSED')
@@ -932,19 +1072,45 @@ export class WhatsAppService implements OnModuleInit {
 
   private async saveUnknownContact(senderContact: any) {
     try {
-      const phone = senderContact.id.user;
+      // Only try to save if web helpers are ready
+      if (!this.webHelpersInjected) {
+        this.logger.debug(
+          'Skipping auto-save of unknown contact: web helpers not ready yet',
+        );
+        return;
+      }
+
+      const phone =
+        senderContact.id?.user ||
+        senderContact.id?._serialized?.replace('@c.us', '');
+      if (!phone) {
+        this.logger.warn(
+          'Cannot auto-save contact: phone number not available',
+        );
+        return;
+      }
+
       const pushname = senderContact.pushname || 'Unknown';
 
-      // Use the existing saveContact method to validate and save
-      await this.saveContact(
-        phone,
-        pushname,
-        'Auto-saved from incoming message',
-      );
-
-      this.logger.log(`Auto-saved unknown contact: ${pushname} (${phone})`);
-    } catch (error) {
-      this.logger.error(`Error auto-saving unknown contact: ${error.message}`);
+      // Try to validate and save, but don't fail if it doesn't work
+      // This is just a convenience feature, not critical
+      try {
+        await this.saveContact(
+          phone,
+          pushname,
+          'Auto-saved from incoming message',
+        );
+        this.logger.log(`Auto-saved unknown contact: ${pushname} (${phone})`);
+      } catch (validationError: any) {
+        // If validation fails (e.g., contact doesn't exist in WhatsApp),
+        // just log it as debug info, don't treat it as an error
+        this.logger.debug(
+          `Could not validate/save contact ${phone}: ${validationError.message}`,
+        );
+      }
+    } catch (error: any) {
+      // Log as debug instead of error since this is non-critical
+      this.logger.debug(`Error auto-saving unknown contact: ${error.message}`);
       // Don't throw error to avoid breaking message processing
     }
   }
@@ -1122,11 +1288,44 @@ export class WhatsAppService implements OnModuleInit {
       // Format phone number to WhatsApp format
       const formattedPhone = phone.replace(/\D/g, '') + '@c.us';
 
-      // Check if contact exists using WhatsApp Web.js
-      const contact = await this.client.getContactById(formattedPhone);
+      // Try to get contact, but handle errors gracefully
+      let contact;
+      let contactName = name || 'Unknown';
 
-      // Get contact name for logging (optional)
-      const contactName = contact.name || contact.pushname || 'Unknown';
+      try {
+        contact = await this.client.getContactById(formattedPhone);
+        // Get contact name if available
+        if (contact) {
+          contactName = contact.name || contact.pushname || contactName;
+        }
+      } catch (contactError: any) {
+        // If getContactById fails, it might be because:
+        // 1. Contact doesn't exist in WhatsApp
+        // 2. Web helpers aren't fully ready
+        // 3. API changes in WhatsApp Web
+
+        const errorMsg = contactError.message || String(contactError);
+
+        if (errorMsg.includes('not found') || errorMsg.includes('404')) {
+          throw new Error(
+            `CONTACT_NOT_FOUND: Contact with phone ${phone} not found.`,
+          );
+        }
+
+        // For other errors (like "Evaluation failed"), log but don't fail
+        // if we have a name provided
+        if (name) {
+          this.logger.warn(
+            `Could not validate contact ${formattedPhone}, but using provided name: ${name}`,
+          );
+          // Continue with the provided name
+        } else {
+          // If no name provided and we can't get contact info, throw error
+          throw new Error(
+            `CONTACT_VALIDATION_ERROR: Could not validate contact: ${errorMsg}`,
+          );
+        }
+      }
 
       this.logger.log(`Contact validated: ${formattedPhone} - ${contactName}`);
 
@@ -1140,9 +1339,18 @@ export class WhatsAppService implements OnModuleInit {
           validatedAt: new Date().toISOString(),
         },
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Error validating contact: ${error.message}`);
 
+      // Re-throw if it's already a formatted error
+      if (
+        error.message.includes('CONTACT_NOT_FOUND') ||
+        error.message.includes('CONTACT_VALIDATION_ERROR')
+      ) {
+        throw error;
+      }
+
+      // Format other errors
       if (error.message.includes('not found')) {
         throw new Error(
           `CONTACT_NOT_FOUND: Contact with phone ${phone} not found.`,
