@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { SpamProtectionService } from './spam-protection.service';
 
 const execAsync = promisify(exec);
 
@@ -43,7 +44,10 @@ export class WhatsAppService implements OnModuleInit {
   private readonly CACHE_DURATION = 60 * 60 * 1000; // 60 minutes in milliseconds
   private readonly MAX_CACHE_SIZE = 100; // Maximum number of cached items
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private configService: ConfigService,
+    private spamProtection: SpamProtectionService,
+  ) {}
 
   /**
    * Recursively find and remove lock files
@@ -1233,8 +1237,39 @@ export class WhatsAppService implements OnModuleInit {
           ? phone
           : phone.replace(/\D/g, '') + '@c.us';
 
+        // ✅ SPAM PROTECTION: Check rate limits before sending
+        const rateLimitCheck =
+          await this.spamProtection.checkRateLimit(formattedPhone);
+
+        if (!rateLimitCheck.allowed) {
+          if (rateLimitCheck.delay) {
+            // Wait for the required delay
+            this.logger.warn(
+              `Rate limit hit for ${formattedPhone}. Waiting ${rateLimitCheck.delay}ms...`,
+            );
+            await new Promise((resolve) =>
+              setTimeout(resolve, rateLimitCheck.delay),
+            );
+            // Check again after delay
+            const recheck =
+              await this.spamProtection.checkRateLimit(formattedPhone);
+            if (!recheck.allowed) {
+              throw new Error(
+                `RATE_LIMIT_EXCEEDED: ${recheck.reason || 'Rate limit exceeded'}`,
+              );
+            }
+          } else {
+            throw new Error(
+              `RATE_LIMIT_EXCEEDED: ${rateLimitCheck.reason || 'Rate limit exceeded'}`,
+            );
+          }
+        }
+
         // Send message directly to the phone number
         await this.client.sendMessage(formattedPhone, message);
+
+        // ✅ SPAM PROTECTION: Record successful send
+        this.spamProtection.recordMessageSent(formattedPhone);
 
         // Try to get contact info for logging (optional)
         let contactName = 'Unknown';
@@ -1259,7 +1294,9 @@ export class WhatsAppService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Error sending message to ${phone}: ${error.message}`);
 
-      if (
+      if (error.message.includes('RATE_LIMIT_EXCEEDED')) {
+        throw new Error(error.message);
+      } else if (
         error.message.includes('CLIENT_NOT_INITIALIZED') ||
         error.message.includes('CLIENT_NOT_AUTHENTICATED') ||
         error.message.includes('CLIENT_NOT_READY') ||
@@ -1271,6 +1308,10 @@ export class WhatsAppService implements OnModuleInit {
           `CONTACT_NOT_FOUND: Contact with phone ${phone} not found.`,
         );
       } else if (error.message.includes('Failed to send')) {
+        // Check if it might be a ban
+        this.logger.error(
+          `Failed to send message. This might indicate a ban. Check WhatsApp status.`,
+        );
         throw new Error(
           `SEND_FAILED: Failed to send message. Please check if you have permission to send messages to this contact.`,
         );
@@ -2990,6 +3031,37 @@ export class WhatsAppService implements OnModuleInit {
         ...stats,
         durationMinutes: Math.round(stats.duration / (1000 * 60)),
       },
+    };
+  }
+
+  /**
+   * Get spam protection statistics
+   */
+  getSpamProtectionStats(phone?: string) {
+    return this.spamProtection.getRateLimitStats(phone);
+  }
+
+  /**
+   * Add phone number to blacklist
+   */
+  addToBlacklist(phone: string) {
+    this.spamProtection.addToBlacklist(phone);
+    return {
+      status: 'success',
+      message: `Phone number ${phone} added to blacklist`,
+      phone,
+    };
+  }
+
+  /**
+   * Remove phone number from blacklist
+   */
+  removeFromBlacklist(phone: string) {
+    this.spamProtection.removeFromBlacklist(phone);
+    return {
+      status: 'success',
+      message: `Phone number ${phone} removed from blacklist`,
+      phone,
     };
   }
 }

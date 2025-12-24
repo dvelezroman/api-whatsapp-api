@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Delete } from '@nestjs/common';
+import { Controller, Post, Body, Get, Delete, Query } from '@nestjs/common';
 import { WhatsAppService } from './whatsapp.service';
 import {
   ApiBody,
@@ -896,5 +896,69 @@ export class WhatsAppController {
   })
   async getMediaCacheStats() {
     return this.whatsappService.getMediaCacheStats();
+  }
+
+  @Get('spam-protection/stats')
+  @ApiOperation({
+    summary: 'Get spam protection rate limit statistics',
+    description:
+      'Returns current rate limit statistics for spam protection. Optionally filter by phone number.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Rate limit statistics',
+  })
+  async getSpamProtectionStats(@Query('phone') phone?: string) {
+    return this.whatsappService.getSpamProtectionStats(phone);
+  }
+
+  @Post('spam-protection/blacklist')
+  @ApiOperation({
+    summary: 'Add phone number to blacklist',
+    description: 'Adds a phone number to the spam protection blacklist.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        phone: {
+          type: 'string',
+          example: '1234567890',
+        },
+      },
+      required: ['phone'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Phone number added to blacklist',
+  })
+  async addToBlacklist(@Body() body: { phone: string }) {
+    return this.whatsappService.addToBlacklist(body.phone);
+  }
+
+  @Delete('spam-protection/blacklist')
+  @ApiOperation({
+    summary: 'Remove phone number from blacklist',
+    description: 'Removes a phone number from the spam protection blacklist.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        phone: {
+          type: 'string',
+          example: '1234567890',
+        },
+      },
+      required: ['phone'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Phone number removed from blacklist',
+  })
+  async removeFromBlacklist(@Body() body: { phone: string }) {
+    return this.whatsappService.removeFromBlacklist(body.phone);
   }
 }
