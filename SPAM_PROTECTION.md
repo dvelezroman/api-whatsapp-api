@@ -217,3 +217,4 @@ Si ves estos errores frecuentemente:
 - Monitorea las estadísticas
 - No excedas los límites recomendados para evitar bans
 
+
