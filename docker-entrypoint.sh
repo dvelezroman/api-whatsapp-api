@@ -13,19 +13,49 @@ SESSION_PATH="/app/whatsapp-session"
 if [ -d "$SESSION_PATH" ]; then
     echo "🧹 Cleaning Chromium lock files on startup..."
     
-    # Matar cualquier proceso Chromium colgado
+    # Matar cualquier proceso Chromium colgado (MÁS AGRESIVO)
+    echo "   Killing Chromium processes..."
+    pkill -9 -f chromium 2>/dev/null || true
+    pkill -9 -f chrome 2>/dev/null || true
+    pkill -9 -f chromium-browser 2>/dev/null || true
     pkill -9 chromium 2>/dev/null || true
     pkill -9 chrome 2>/dev/null || true
     pkill -9 chromium-browser 2>/dev/null || true
     
-    # Esperar un momento para que los procesos terminen
-    sleep 1
+    # Buscar procesos por PID y matarlos
+    for pid in $(ps aux | grep -iE "(chromium|chrome)" | grep -v grep | awk '{print $2}' 2>/dev/null || true); do
+        kill -9 "$pid" 2>/dev/null || true
+    done
     
-    # Eliminar todos los archivos Singleton*
-    find "$SESSION_PATH" -type f \( -name "*Singleton*" -o -name "*lock*" -o -name "*Lock*" \) -delete 2>/dev/null || true
+    # Esperar más tiempo para que los procesos terminen y liberen file handles
+    echo "   Waiting for processes to terminate..."
+    sleep 3
+    
+    # Verificar que no queden procesos
+    REMAINING=$(ps aux | grep -iE "(chromium|chrome)" | grep -v grep | wc -l 2>/dev/null || echo "0")
+    if [ "$REMAINING" -gt 0 ]; then
+        echo "   ⚠️  Warning: Some Chromium processes may still be running. Forcing kill..."
+        sleep 2
+        pkill -9 -f chromium 2>/dev/null || true
+        pkill -9 -f chrome 2>/dev/null || true
+        sleep 1
+    fi
+    
+    # Eliminar todos los archivos Singleton* y locks (MÁS AGRESIVO)
+    echo "   Removing lock files..."
+    find "$SESSION_PATH" -type f \( -iname "*Singleton*" -o -iname "*lock*" -o -iname "*Lock*" \) -delete 2>/dev/null || true
+    
+    # Eliminar específicamente SingletonLock, SingletonCookie, SingletonSocket
+    find "$SESSION_PATH" -name "SingletonLock" -o -name "SingletonCookie" -o -name "SingletonSocket" -o -name "SingletonFile" | xargs rm -f 2>/dev/null || true
     
     # Eliminar directorios de lock
-    find "$SESSION_PATH" -type d -name "*lock*" -exec rm -rf {} + 2>/dev/null || true
+    find "$SESSION_PATH" -type d -iname "*lock*" -exec rm -rf {} + 2>/dev/null || true
+    
+    # Cambiar permisos de archivos restantes para poder eliminarlos si es necesario
+    chmod -R 755 "$SESSION_PATH" 2>/dev/null || true
+    
+    # Sincronizar sistema de archivos
+    sync 2>/dev/null || true
     
     echo "✅ Chromium locks cleaned"
 else

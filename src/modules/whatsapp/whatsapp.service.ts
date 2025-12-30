@@ -123,17 +123,67 @@ export class WhatsAppService implements OnModuleInit {
     try {
       this.logger.warn('Killing any lingering Chromium processes...');
 
-      // Kill chromium processes
+      // First, try to find all Chromium-related processes
       try {
+        // Find processes by name pattern
+        const findProcesses = await execAsync(
+          `ps aux | grep -iE "(chromium|chrome|chromium-browser)" | grep -v grep || true`,
+        );
+
+        if (findProcesses.stdout.trim()) {
+          const lines = findProcesses.stdout.trim().split('\n');
+          for (const line of lines) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length >= 2) {
+              const pid = parts[1];
+              try {
+                this.logger.warn(`Killing Chromium process PID: ${pid}`);
+                await execAsync(`kill -9 ${pid} 2>/dev/null || true`);
+              } catch {
+                // Ignore individual process kill errors
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore if ps/grep fails
+      }
+
+      // Kill chromium processes by name (more aggressive)
+      try {
+        await execAsync('pkill -9 -f chromium || true');
+        await execAsync('pkill -9 -f chrome || true');
+        await execAsync('pkill -9 -f chromium-browser || true');
         await execAsync('pkill -9 chromium || true');
         await execAsync('pkill -9 chrome || true');
         await execAsync('pkill -9 chromium-browser || true');
-        // Wait a bit for processes to die
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        this.logger.log('Chromium processes killed');
       } catch (error: any) {
         // Ignore errors if no processes found
         this.logger.debug(`No Chromium processes to kill: ${error.message}`);
+      }
+
+      // Wait longer for processes to die and file handles to be released
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // Verify processes are gone
+      try {
+        const verifyProcesses = await execAsync(
+          `ps aux | grep -iE "(chromium|chrome|chromium-browser)" | grep -v grep || true`,
+        );
+        if (verifyProcesses.stdout.trim()) {
+          this.logger.warn(
+            'Some Chromium processes may still be running. Waiting longer...',
+          );
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          // Try one more aggressive kill
+          await execAsync('pkill -9 -f chromium || true');
+          await execAsync('pkill -9 -f chrome || true');
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        } else {
+          this.logger.log('All Chromium processes killed successfully');
+        }
+      } catch {
+        // Ignore verification errors
       }
     } catch (error: any) {
       this.logger.debug(`Error killing Chromium processes: ${error.message}`);
@@ -159,16 +209,28 @@ export class WhatsAppService implements OnModuleInit {
       this.removeLockFilesRecursive(sessionPath);
 
       // Also specifically check common locations with more paths
+      // These are the critical files that Chromium uses to detect if profile is in use
       const commonLockPaths = [
         'SingletonLock',
+        'SingletonCookie',
+        'SingletonSocket',
+        'SingletonFile',
         'lockfile',
         '.lock',
-        'SingletonCookie',
+        'session/SingletonLock',
+        'session/SingletonCookie',
+        'session/SingletonSocket',
+        'session/Default/SingletonLock',
+        'session/Default/SingletonCookie',
+        'session/Default/lockfile',
+        'session/Default/.lock',
         'Default/SingletonLock',
+        'Default/SingletonCookie',
+        'Default/SingletonSocket',
         'Default/lockfile',
         'Default/.lock',
-        'Default/SingletonCookie',
         'Default/Default/SingletonLock',
+        'Default/Default/SingletonCookie',
         'Session Storage/SingletonLock',
         'Local Storage/SingletonLock',
         'IndexedDB/SingletonLock',
@@ -176,20 +238,28 @@ export class WhatsAppService implements OnModuleInit {
         'Code Cache/SingletonLock',
       ];
 
-      // Also find and remove any file containing "lock" in the name
+      // Also find and remove any file containing "lock" or "singleton" in the name
+      // This is critical - Chromium uses Singleton* files to detect if profile is in use
       try {
         const findLockFiles = await execAsync(
-          `find "${sessionPath}" -type f -iname "*lock*" -o -iname "*singleton*" 2>/dev/null || true`,
+          `find "${sessionPath}" -type f \\( -iname "*lock*" -o -iname "*singleton*" -o -iname "*Lock*" -o -iname "*Singleton*" \\) 2>/dev/null || true`,
         );
         const foundLocks = findLockFiles.stdout
           .split('\n')
           .filter((line) => line.trim() && fs.existsSync(line.trim()));
         for (const lockFile of foundLocks) {
           try {
-            this.logger.warn(`Removing found lock file: ${lockFile.trim()}`);
-            await execAsync(`rm -f "${lockFile.trim()}"`);
+            const trimmedPath = lockFile.trim();
+            this.logger.warn(`Removing found lock file: ${trimmedPath}`);
+            // Try to change permissions first, then remove
+            try {
+              fs.chmodSync(trimmedPath, 0o666);
+            } catch {
+              // Ignore chmod errors
+            }
+            await execAsync(`rm -f "${trimmedPath}" 2>/dev/null || true`);
           } catch {
-            // Ignore
+            // Ignore individual file removal errors
           }
         }
       } catch {
@@ -236,26 +306,77 @@ export class WhatsAppService implements OnModuleInit {
         }
       }
 
-      // Force remove any remaining lock files using find and rm
+      // Force remove any remaining lock files using find and rm (MOST AGGRESSIVE)
+      // This is the last resort - remove ALL Singleton* and lock* files
       try {
+        this.logger.warn('Performing aggressive lock file removal...');
+        // Remove all Singleton* files (case insensitive)
         await execAsync(
-          `find "${sessionPath}" -type f \\( -name "*lock*" -o -name "*Lock*" -o -name "*singleton*" -o -name "*Singleton*" \\) -delete 2>/dev/null || true`,
+          `find "${sessionPath}" -type f \\( -iname "*lock*" -o -iname "*Lock*" -o -iname "*singleton*" -o -iname "*Singleton*" \\) -exec rm -f {} + 2>/dev/null || true`,
         );
+        // Remove lock directories
         await execAsync(
-          `find "${sessionPath}" -type d -name "*lock*" -exec rm -rf {} + 2>/dev/null || true`,
+          `find "${sessionPath}" -type d -iname "*lock*" -exec rm -rf {} + 2>/dev/null || true`,
+        );
+        // Specifically target SingletonLock, SingletonCookie, SingletonSocket
+        await execAsync(
+          `find "${sessionPath}" -name "SingletonLock" -o -name "SingletonCookie" -o -name "SingletonSocket" -o -name "SingletonFile" | xargs rm -f 2>/dev/null || true`,
         );
       } catch {
         // Ignore errors
       }
 
       // Wait longer to ensure file system operations complete and sync
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // This is critical - give the OS time to release file handles
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       // Force filesystem sync
       try {
         await execAsync('sync');
       } catch {
         // Ignore if sync command not available
+      }
+
+      // One final check - try to remove SingletonLock one more time if it exists
+      const singletonLockPath = path.join(
+        sessionPath,
+        'session',
+        'SingletonLock',
+      );
+      if (fs.existsSync(singletonLockPath)) {
+        this.logger.warn(
+          'SingletonLock still exists, attempting final removal...',
+        );
+        try {
+          fs.chmodSync(singletonLockPath, 0o666);
+          fs.unlinkSync(singletonLockPath);
+          this.logger.log('SingletonLock removed successfully');
+        } catch (error: any) {
+          this.logger.warn(
+            `Could not remove SingletonLock: ${error.message}. Will try again on next attempt.`,
+          );
+        }
+      }
+
+      // Also check for SingletonCookie
+      const singletonCookiePath = path.join(
+        sessionPath,
+        'session',
+        'SingletonCookie',
+      );
+      if (fs.existsSync(singletonCookiePath)) {
+        this.logger.warn(
+          'SingletonCookie still exists, attempting final removal...',
+        );
+        try {
+          fs.chmodSync(singletonCookiePath, 0o666);
+          fs.unlinkSync(singletonCookiePath);
+          this.logger.log('SingletonCookie removed successfully');
+        } catch (error: any) {
+          this.logger.warn(
+            `Could not remove SingletonCookie: ${error.message}. Will try again on next attempt.`,
+          );
+        }
       }
 
       this.logger.log('Chromium lock file cleanup completed');
