@@ -99,7 +99,10 @@ print_status "✅ Volúmenes huérfanos eliminados"
 
 # Prune system (optional - more aggressive)
 print_status "🧹 Limpiando sistema Docker (prune)..."
-docker system prune -f --volumes 2>/dev/null || true
+# Prune containers, images, networks (but keep volumes to be safe)
+docker system prune -f 2>/dev/null || true
+# Prune build cache separately
+docker builder prune -a -f 2>/dev/null || true
 print_status "✅ Sistema Docker limpiado"
 
 # Remove unused networks
