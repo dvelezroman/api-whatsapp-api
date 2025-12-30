@@ -2,8 +2,15 @@
 
 # WhatsApp API Deployment Script
 # This script updates and deploys the API to VPS while maintaining the WhatsApp session
+# Usage: ./deploy.sh [--clean-docker]
 
 set -e  # Exit on any error
+
+# Check for --clean-docker flag
+CLEAN_DOCKER=false
+if [[ "$1" == "--clean-docker" ]] || [[ "$1" == "-c" ]]; then
+    CLEAN_DOCKER=true
+fi
 
 echo "🚀 Starting WhatsApp API deployment..."
 
@@ -30,6 +37,30 @@ print_error() {
 if [ ! -f "docker-compose.yml" ]; then
     print_error "docker-compose.yml not found. Please run this script from the project root."
     exit 1
+fi
+
+# Clean Docker if requested
+if [ "$CLEAN_DOCKER" = true ]; then
+    print_status "🐳 Cleaning Docker (containers, images, volumes)..."
+    if [ -f "./clean-docker.sh" ]; then
+        # Run clean-docker.sh with --yes flag to skip confirmation
+        ./clean-docker.sh --yes || {
+            print_warning "Docker cleanup had some issues, continuing anyway..."
+        }
+    else
+        # Fallback: manual Docker cleanup
+        print_status "   Stopping and removing container..."
+        docker compose stop whatsapp-api 2>/dev/null || docker-compose stop whatsapp-api 2>/dev/null || true
+        docker compose rm -f whatsapp-api 2>/dev/null || docker-compose rm -f whatsapp-api 2>/dev/null || true
+        
+        print_status "   Removing images..."
+        docker images | grep -i "whatsapp" | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
+        
+        print_status "   Cleaning system..."
+        docker system prune -f 2>/dev/null || true
+    fi
+    print_status "✅ Docker cleaned"
+    echo ""
 fi
 
 # Clean up old backups (keep only last 3)
@@ -97,3 +128,4 @@ echo "  - If you need to scan QR code again, check logs: docker-compose logs -f"
 echo "  - To view API logs: docker-compose logs -f whatsapp-api"
 echo "  - To restart: docker-compose restart"
 echo "  - To stop: docker-compose down"
+echo "  - To clean Docker before deploy: ./deploy.sh --clean-docker"
