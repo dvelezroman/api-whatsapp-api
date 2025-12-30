@@ -61,15 +61,41 @@ docker compose stop whatsapp-api 2>/dev/null || docker-compose stop whatsapp-api
 sleep 2
 
 print_status "🔪 Matando procesos Chromium colgados..."
+# Matar procesos Chromium (intentar sin sudo primero)
 pkill -9 chromium 2>/dev/null || true
 pkill -9 chrome 2>/dev/null || true
 pkill -9 chromium-browser 2>/dev/null || true
-sleep 1
+
+# Si hay procesos protegidos, usar sudo
+sudo pkill -9 chromium 2>/dev/null || true
+sudo pkill -9 chrome 2>/dev/null || true
+sudo pkill -9 chromium-browser 2>/dev/null || true
+
+# También buscar procesos por nombre completo (compatible con macOS y Linux)
+CHROMIUM_PIDS=$(ps aux | grep -i chromium | grep -v grep | awk '{print $2}' 2>/dev/null || true)
+if [ -n "$CHROMIUM_PIDS" ]; then
+    echo "$CHROMIUM_PIDS" | xargs kill -9 2>/dev/null || true
+    echo "$CHROMIUM_PIDS" | xargs sudo kill -9 2>/dev/null || true
+fi
+
+sleep 2
 
 print_status "🗑️  Eliminando directorio de sesión principal..."
 if [ -d "whatsapp-session" ]; then
-    rm -rf whatsapp-session
-    print_status "✅ Sesión principal eliminada"
+    # Cambiar permisos primero para poder eliminar todo
+    print_status "   Cambiando permisos de archivos..."
+    sudo chown -R $(id -u):$(id -g) whatsapp-session 2>/dev/null || true
+    sudo chmod -R 755 whatsapp-session 2>/dev/null || true
+    
+    # Intentar eliminar sin sudo primero
+    if rm -rf whatsapp-session 2>/dev/null; then
+        print_status "✅ Sesión principal eliminada"
+    else
+        # Si falla, usar sudo
+        print_status "   Usando sudo para eliminar archivos protegidos..."
+        sudo rm -rf whatsapp-session
+        print_status "✅ Sesión principal eliminada (con sudo)"
+    fi
 else
     print_warning "Directorio whatsapp-session no encontrado"
 fi
@@ -79,8 +105,18 @@ backup_count=0
 if ls whatsapp-session-backup-* 1> /dev/null 2>&1; then
     for backup in whatsapp-session-backup-*; do
         if [ -d "$backup" ] || [ -f "$backup" ]; then
-            rm -rf "$backup"
-            backup_count=$((backup_count + 1))
+            # Cambiar permisos primero
+            sudo chown -R $(id -u):$(id -g) "$backup" 2>/dev/null || true
+            sudo chmod -R 755 "$backup" 2>/dev/null || true
+            
+            # Intentar eliminar sin sudo primero
+            if rm -rf "$backup" 2>/dev/null; then
+                backup_count=$((backup_count + 1))
+            else
+                # Si falla, usar sudo
+                sudo rm -rf "$backup"
+                backup_count=$((backup_count + 1))
+            fi
         fi
     done
     print_status "✅ $backup_count backup(s) eliminado(s)"
@@ -90,17 +126,32 @@ fi
 
 print_status "🧹 Limpiando locks de Chromium residuales..."
 # Buscar y eliminar cualquier lock file residual
+# Primero intentar sin sudo
 find . -type f \( -name "*Singleton*" -o -name "*lock*" -o -name "*Lock*" \) \
     -not -path "./node_modules/*" \
     -not -path "./.git/*" \
     -not -path "./dist/*" \
     -delete 2>/dev/null || true
 
+# Si hay archivos protegidos, usar sudo
+find . -type f \( -name "*Singleton*" -o -name "*lock*" -o -name "*Lock*" \) \
+    -not -path "./node_modules/*" \
+    -not -path "./.git/*" \
+    -not -path "./dist/*" \
+    -exec sudo rm -f {} + 2>/dev/null || true
+
 find . -type d -name "*lock*" \
     -not -path "./node_modules/*" \
     -not -path "./.git/*" \
     -not -path "./dist/*" \
     -exec rm -rf {} + 2>/dev/null || true
+
+# Si hay directorios protegidos, usar sudo
+find . -type d -name "*lock*" \
+    -not -path "./node_modules/*" \
+    -not -path "./.git/*" \
+    -not -path "./dist/*" \
+    -exec sudo rm -rf {} + 2>/dev/null || true
 
 print_status "✅ Locks limpiados"
 
@@ -134,4 +185,5 @@ else
 fi
 
 echo ""
+
 
