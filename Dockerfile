@@ -4,12 +4,23 @@ FROM node:22-slim AS builder
 WORKDIR /app
 
 # Install build dependencies
-COPY package*.json ./
-COPY .npmrc ./
-# Clean npm cache and install with cache cleanup
-RUN npm cache clean --force && \
-    npm ci --legacy-peer-deps && \
-    npm cache clean --force
+# Copy package files explicitly to ensure package-lock.json is included
+COPY package.json ./
+COPY package-lock.json ./
+# Copy .npmrc if it exists (optional)
+COPY .npmrc* ./
+# Verify package-lock.json exists and run npm ci
+RUN ls -la package*.json && \
+    if [ ! -f package-lock.json ]; then \
+        echo "ERROR: package-lock.json not found! Generating it..." && \
+        npm install --legacy-peer-deps && \
+        npm cache clean --force; \
+    else \
+        echo "package-lock.json found, using npm ci..." && \
+        npm cache clean --force && \
+        npm ci --legacy-peer-deps && \
+        npm cache clean --force; \
+    fi
 
 # Copy all source files
 COPY . .
@@ -72,12 +83,22 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy only package files & install production dependencies
-COPY package*.json ./
-COPY .npmrc ./
-# Clean npm cache before and after install
-RUN npm cache clean --force && \
-    npm ci --omit=dev --legacy-peer-deps && \
-    npm cache clean --force
+# Copy package files explicitly to ensure package-lock.json is included
+COPY package.json ./
+COPY package-lock.json ./
+# Copy .npmrc if it exists (optional)
+COPY .npmrc* ./
+# Verify package-lock.json exists and run npm ci
+RUN ls -la package*.json && \
+    if [ ! -f package-lock.json ]; then \
+        echo "ERROR: package-lock.json not found in production stage! This should not happen." && \
+        exit 1; \
+    else \
+        echo "package-lock.json found, using npm ci..." && \
+        npm cache clean --force && \
+        npm ci --omit=dev --legacy-peer-deps && \
+        npm cache clean --force; \
+    fi
 
 # Copy build output from builder stage
 COPY --from=builder /app/dist ./dist
