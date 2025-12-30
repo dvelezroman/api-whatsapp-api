@@ -124,77 +124,125 @@ export class WhatsAppService implements OnModuleInit {
       this.logger.warn('Killing any lingering Chromium processes...');
 
       let processesKilled = 0;
+      const maxAttempts = 3;
 
-      // First, try to find all Chromium-related processes
-      try {
-        // Find processes by name pattern
-        const findProcesses = await execAsync(
-          `ps aux | grep -iE "(chromium|chrome|chromium-browser)" | grep -v grep || true`,
-        );
+      // Multiple aggressive kill attempts
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        // First, try to find all Chromium-related processes
+        try {
+          // Find processes by name pattern
+          const findProcesses = await execAsync(
+            `ps aux | grep -iE "(chromium|chrome|chromium-browser)" | grep -v grep || true`,
+          );
 
-        if (findProcesses.stdout.trim()) {
-          const lines = findProcesses.stdout.trim().split('\n');
-          for (const line of lines) {
-            const parts = line.trim().split(/\s+/);
-            if (parts.length >= 2) {
-              const pid = parts[1];
-              try {
-                this.logger.warn(`Killing Chromium process PID: ${pid}`);
-                await execAsync(`kill -9 ${pid} 2>/dev/null || true`);
-                processesKilled++;
-              } catch {
-                // Ignore individual process kill errors
+          if (findProcesses.stdout.trim()) {
+            const lines = findProcesses.stdout.trim().split('\n');
+            const pids: string[] = [];
+
+            for (const line of lines) {
+              const parts = line.trim().split(/\s+/);
+              if (parts.length >= 2) {
+                const pid = parts[1];
+                pids.push(pid);
+              }
+            }
+
+            // Kill all PIDs in batch
+            if (pids.length > 0) {
+              if (attempt === 0) {
+                // Only log on first attempt to avoid spam
+                this.logger.warn(
+                  `Found ${pids.length} Chromium process(es) to kill`,
+                );
+              }
+
+              // Kill all processes at once
+              for (const pid of pids) {
+                try {
+                  await execAsync(`kill -9 ${pid} 2>/dev/null || true`);
+                  processesKilled++;
+                } catch {
+                  // Ignore individual process kill errors
+                }
               }
             }
           }
+        } catch {
+          // Ignore if ps/grep fails
         }
-      } catch {
-        // Ignore if ps/grep fails
-      }
 
-      // Kill chromium processes by name (more aggressive)
-      // This is a fallback to catch any processes we might have missed
-      try {
-        await execAsync('pkill -9 -f chromium || true');
-        await execAsync('pkill -9 -f chrome || true');
-        await execAsync('pkill -9 -f chromium-browser || true');
-        await execAsync('pkill -9 chromium || true');
-        await execAsync('pkill -9 chrome || true');
-        await execAsync('pkill -9 chromium-browser || true');
-        // pkill returns non-zero if no processes found, which is normal
-      } catch {
-        // This is expected if no processes are found - not an error
+        // Kill chromium processes by name (MOST AGGRESSIVE)
+        // This catches processes that might have been created between checks
+        try {
+          await execAsync('pkill -9 -f chromium 2>/dev/null || true');
+          await execAsync('pkill -9 -f chrome 2>/dev/null || true');
+          await execAsync('pkill -9 -f chromium-browser 2>/dev/null || true');
+          await execAsync('pkill -9 chromium 2>/dev/null || true');
+          await execAsync('pkill -9 chrome 2>/dev/null || true');
+          await execAsync('pkill -9 chromium-browser 2>/dev/null || true');
+          // Also try to kill by process group
+          await execAsync(
+            'killall -9 chromium chromium-browser chrome 2>/dev/null || true',
+          );
+        } catch {
+          // This is expected if no processes are found - not an error
+        }
+
+        // Wait between attempts
+        if (attempt < maxAttempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
       }
 
       if (processesKilled > 0) {
-        this.logger.log(`Successfully killed ${processesKilled} Chromium process(es)`);
+        this.logger.log(
+          `Successfully killed ${processesKilled} Chromium process(es)`,
+        );
       } else {
-        this.logger.debug('No Chromium processes found to kill (this is normal)');
+        this.logger.debug(
+          'No Chromium processes found to kill (this is normal)',
+        );
       }
 
       // Wait longer for processes to die and file handles to be released
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
 
-      // Verify processes are gone
-      try {
-        const verifyProcesses = await execAsync(
-          `ps aux | grep -iE "(chromium|chrome|chromium-browser)" | grep -v grep || true`,
-        );
-        if (verifyProcesses.stdout.trim()) {
-          this.logger.warn(
-            'Some Chromium processes may still be running. Waiting longer...',
+      // Verify processes are gone (multiple checks)
+      let remainingProcesses = true;
+      for (
+        let verifyAttempt = 0;
+        verifyAttempt < 3 && remainingProcesses;
+        verifyAttempt++
+      ) {
+        try {
+          const verifyProcesses = await execAsync(
+            `ps aux | grep -iE "(chromium|chrome|chromium-browser)" | grep -v grep || true`,
           );
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          // Try one more aggressive kill
-          await execAsync('pkill -9 -f chromium || true');
-          await execAsync('pkill -9 -f chrome || true');
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        } else {
-          this.logger.log('All Chromium processes killed successfully');
+          if (verifyProcesses.stdout.trim()) {
+            const remainingCount = verifyProcesses.stdout
+              .trim()
+              .split('\n').length;
+            this.logger.warn(
+              `Still ${remainingCount} Chromium process(es) running. Attempting final kill...`,
+            );
+            // One more aggressive kill
+            await execAsync('pkill -9 -f chromium 2>/dev/null || true');
+            await execAsync('pkill -9 -f chrome 2>/dev/null || true');
+            await execAsync(
+              'killall -9 chromium chromium-browser chrome 2>/dev/null || true',
+            );
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          } else {
+            remainingProcesses = false;
+            this.logger.log('All Chromium processes killed successfully');
+          }
+        } catch {
+          remainingProcesses = false;
         }
-      } catch {
-        // Ignore verification errors
       }
+
+      // Final wait to ensure everything is cleaned up
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     } catch (error: any) {
       this.logger.debug(`Error killing Chromium processes: ${error.message}`);
     }
@@ -737,11 +785,15 @@ export class WhatsAppService implements OnModuleInit {
         }
       }
 
-      // Clean up Chromium lock files before initializing
+      // CRITICAL: Kill ALL Chromium processes FIRST before cleaning locks
+      // This prevents new processes from being created while we're cleaning
+      await this.killChromiumProcesses();
+
+      // Clean up Chromium lock files after processes are killed
       await this.cleanupChromiumLocks();
 
       // Wait longer to ensure any lingering processes are gone and file system is ready
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
 
       // Reset state flags
       this.isClientReady = false;
@@ -1106,6 +1158,26 @@ export class WhatsAppService implements OnModuleInit {
     });
   }
 
+  /**
+   * Check if a contact ID is a system/special contact that should not be saved
+   */
+  private isSystemContact(contactId: string): boolean {
+    if (!contactId) return false;
+
+    // System contacts that should not be saved or processed as regular contacts
+    const systemContactPatterns = [
+      'status@broadcast', // WhatsApp status updates
+      '@broadcast', // Broadcast lists
+      '@g.us', // Groups
+      '@newsletter', // Newsletters
+      'c.us', // Sometimes appears in system messages
+    ];
+
+    return systemContactPatterns.some((pattern) =>
+      contactId.toLowerCase().includes(pattern.toLowerCase()),
+    );
+  }
+
   private async handleIncomingMessage(message: any) {
     try {
       // Skip messages from self
@@ -1115,6 +1187,15 @@ export class WhatsAppService implements OnModuleInit {
 
       // Get sender information
       const sender = message.from;
+
+      // Skip system contacts (status, broadcasts, groups, etc.)
+      if (this.isSystemContact(sender)) {
+        this.logger.debug(
+          `Skipping message from system contact: ${sender} (${message.body?.substring(0, 50) || 'no body'})`,
+        );
+        return;
+      }
+
       let senderContact: any = null;
       let isRegisteredContact = false;
 
@@ -1156,7 +1237,12 @@ export class WhatsAppService implements OnModuleInit {
       }
 
       // If unknown contact, try to save it (but don't fail if this fails)
-      if (!isRegisteredContact && senderContact) {
+      // Skip system contacts - they should not be saved
+      if (
+        !isRegisteredContact &&
+        senderContact &&
+        !this.isSystemContact(sender)
+      ) {
         try {
           await this.saveUnknownContact(senderContact);
         } catch (saveError) {
@@ -1181,6 +1267,11 @@ export class WhatsAppService implements OnModuleInit {
         }
       } else {
         // Log messages when no webhook is configured
+        // Skip logging for system contacts (already filtered above, but double-check)
+        if (this.isSystemContact(sender)) {
+          return; // Already logged as debug above
+        }
+
         const contactName =
           senderContact?.name ||
           senderContact?.pushname ||
