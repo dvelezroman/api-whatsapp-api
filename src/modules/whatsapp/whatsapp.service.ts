@@ -123,6 +123,8 @@ export class WhatsAppService implements OnModuleInit {
     try {
       this.logger.warn('Killing any lingering Chromium processes...');
 
+      let processesKilled = 0;
+
       // First, try to find all Chromium-related processes
       try {
         // Find processes by name pattern
@@ -139,6 +141,7 @@ export class WhatsAppService implements OnModuleInit {
               try {
                 this.logger.warn(`Killing Chromium process PID: ${pid}`);
                 await execAsync(`kill -9 ${pid} 2>/dev/null || true`);
+                processesKilled++;
               } catch {
                 // Ignore individual process kill errors
               }
@@ -150,6 +153,7 @@ export class WhatsAppService implements OnModuleInit {
       }
 
       // Kill chromium processes by name (more aggressive)
+      // This is a fallback to catch any processes we might have missed
       try {
         await execAsync('pkill -9 -f chromium || true');
         await execAsync('pkill -9 -f chrome || true');
@@ -157,9 +161,15 @@ export class WhatsAppService implements OnModuleInit {
         await execAsync('pkill -9 chromium || true');
         await execAsync('pkill -9 chrome || true');
         await execAsync('pkill -9 chromium-browser || true');
-      } catch (error: any) {
-        // Ignore errors if no processes found
-        this.logger.debug(`No Chromium processes to kill: ${error.message}`);
+        // pkill returns non-zero if no processes found, which is normal
+      } catch {
+        // This is expected if no processes are found - not an error
+      }
+
+      if (processesKilled > 0) {
+        this.logger.log(`Successfully killed ${processesKilled} Chromium process(es)`);
+      } else {
+        this.logger.debug('No Chromium processes found to kill (this is normal)');
       }
 
       // Wait longer for processes to die and file handles to be released
