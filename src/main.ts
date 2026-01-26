@@ -28,7 +28,10 @@ async function bootstrap() {
       - QR code authentication
       
       ## Authentication
-      This API uses WhatsApp Web authentication. You need to scan a QR code to connect your WhatsApp account.
+      This API uses server-to-server Bearer token authentication. Include your API token in the Authorization header:
+      \`Authorization: Bearer <your-api-token>\`
+      
+      You also need to scan a QR code to connect your WhatsApp account via the /whatsapp/qrcode endpoint.
       
       ## Webhook Integration
       Configure webhooks to receive and process incoming messages from unknown contacts automatically.
@@ -37,6 +40,15 @@ async function bootstrap() {
     .setVersion('1.0.0')
     .addTag('WhatsApp', 'Core WhatsApp messaging functionality')
     .addTag('Qr', 'QR code authentication endpoints')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'Token',
+        description: 'Enter your API token',
+      },
+      'bearer',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

@@ -8,6 +8,7 @@ import { WhatsAppService } from './modules/whatsapp/whatsapp.service';
 import { QrModule } from './modules/qr/qr.module';
 import { QRController } from './modules/qr/qr.controller';
 import { QrService } from './modules/qr/qr.service';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { QrService } from './modules/qr/qr.service';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    AuthModule,
     WhatsAppModule,
     QrModule,
   ],
