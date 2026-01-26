@@ -32,6 +32,41 @@ if [ ! -f "docker-compose.yml" ]; then
     exit 1
 fi
 
+# Check if API_TOKEN is set
+if [ -z "$API_TOKEN" ]; then
+    if [ -f ".env" ]; then
+        # Try to load from .env file (docker-compose will also read this automatically)
+        # Source .env file to load variables
+        set -a
+        source .env
+        set +a
+    fi
+    
+    if [ -z "$API_TOKEN" ]; then
+        print_warning "API_TOKEN environment variable is not set!"
+        print_warning "Please set API_TOKEN in your .env file or export it before running deploy.sh"
+        print_warning "Example: export API_TOKEN=your-secret-token-here"
+        print_warning ""
+        
+        # Only prompt if running interactively
+        if [ -t 0 ]; then
+            read -p "Do you want to continue without API_TOKEN? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_error "Deployment cancelled. Please set API_TOKEN and try again."
+                exit 1
+            fi
+        else
+            print_warning "Running in non-interactive mode. Continuing without API_TOKEN..."
+            print_warning "⚠️  WARNING: API will not be protected without API_TOKEN!"
+        fi
+    else
+        print_status "API_TOKEN loaded from .env file"
+    fi
+else
+    print_status "API_TOKEN is set from environment"
+fi
+
 # Clean up old backups (keep only last 3)
 print_status "Cleaning up old session backups (keeping last 3)..."
 if ls whatsapp-session-backup-* 1> /dev/null 2>&1; then
@@ -88,7 +123,13 @@ docker-compose logs --tail=20
 print_status "🎉 Deployment completed successfully!"
 print_status "📱 WhatsApp session is preserved in ./whatsapp-session"
 print_status "🌐 API is available at http://localhost:3005"
-print_status "📚 API documentation at http://localhost:3005/api"
+print_status "📚 API documentation at http://localhost:3005/docs"
+if [ -n "$API_TOKEN" ]; then
+    print_status "🔐 API is protected with Bearer token authentication"
+    print_status "   Use: Authorization: Bearer <your-api-token>"
+else
+    print_warning "⚠️  API_TOKEN not set - API is not protected!"
+fi
 
 echo ""
 print_warning "Important notes:"

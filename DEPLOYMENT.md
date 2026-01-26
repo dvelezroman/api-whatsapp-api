@@ -99,12 +99,19 @@ docker-compose up -d
 Once deployed, the API will be available at:
 
 - **Base URL**: `http://your-vps-ip:3005`
-- **API Documentation**: `http://your-vps-ip:3005/api`
-- **QR Code**: `GET /whatsapp/qrcode`
-- **Send Message**: `POST /whatsapp/send`
-- **Save Contact**: `POST /whatsapp/contacts`
-- **Get Groups**: `GET /whatsapp/groups`
-- **Get Diffusion Groups**: `GET /whatsapp/diffusion-groups`
+- **API Documentation**: `http://your-vps-ip:3005/docs`
+- **Public Endpoints** (no authentication required):
+  - `GET /` - Welcome message
+  - `GET /health` - Health check
+  - `GET /qr` - QR code page
+  - `GET /docs` - API documentation
+- **Protected Endpoints** (require `Authorization: Bearer <API_TOKEN>`):
+  - `GET /whatsapp/qrcode` - Get QR code for authentication
+  - `POST /whatsapp/send` - Send message
+  - `POST /whatsapp/contacts` - Save contact
+  - `GET /whatsapp/groups` - Get groups
+  - `GET /whatsapp/diffusion-groups` - Get diffusion groups
+  - All other `/whatsapp/*` endpoints
 
 ## Troubleshooting
 
@@ -147,8 +154,13 @@ docker system prune -f
 
 1. **Firewall**: Ensure only necessary ports are open
 2. **HTTPS**: Consider using a reverse proxy with SSL
-3. **Authentication**: Add API authentication if needed
-4. **Session Backup**: Regularly backup the `whatsapp-session` directory
+3. **API Authentication**: The API uses Bearer token authentication. Always set a strong `API_TOKEN` in your `.env` file
+4. **Token Security**: 
+   - Use a strong, randomly generated token
+   - Never commit the `.env` file to version control
+   - Rotate tokens periodically
+   - Keep tokens secure and limit access
+5. **Session Backup**: Regularly backup the `whatsapp-session` directory
 
 ## Backup and Restore
 
@@ -177,7 +189,29 @@ You can customize the deployment by creating a `.env` file:
 ```env
 NODE_ENV=production
 PORT=3005
+API_TOKEN=your-secret-api-token-here
 ```
+
+### Required Variables
+
+- **API_TOKEN** (Required): Secret token for server-to-server authentication. All API endpoints (except `/`, `/health`, `/qr`, and `/docs`) require this token in the `Authorization: Bearer <token>` header.
+
+### Setting API_TOKEN
+
+You can set the API_TOKEN in two ways:
+
+1. **Using .env file** (Recommended):
+   ```bash
+   echo "API_TOKEN=your-secret-token-here" >> .env
+   ```
+
+2. **Exporting before deployment**:
+   ```bash
+   export API_TOKEN=your-secret-token-here
+   ./deploy.sh
+   ```
+
+**Important**: Without `API_TOKEN`, the API will not be protected and all endpoints will be accessible without authentication.
 
 ## Monitoring
 
