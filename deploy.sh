@@ -86,9 +86,21 @@ fi
 print_status "Cleaning Chromium lock files..."
 find whatsapp-session -name "Singleton*" -type f -delete || true
 
+# Detect docker compose command (v2 or v1)
+if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    DOCKER_COMPOSE_CMD="docker compose"
+    print_status "Using Docker Compose V2"
+elif command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+    print_status "Using Docker Compose V1"
+else
+    print_error "Neither 'docker compose' nor 'docker-compose' found. Please install Docker Compose."
+    exit 1
+fi
+
 # Stop container GRACEFULLY
 print_status "Stopping container gracefully..."
-docker-compose stop || true
+$DOCKER_COMPOSE_CMD stop || true
 
 # Pull latest changes (if using git)
 if [ -d ".git" ]; then
@@ -98,27 +110,59 @@ fi
 
 # Build
 print_status "Building new Docker image..."
-docker-compose build
+
+# Check if we're in the correct directory with Dockerfile
+if [ ! -f "Dockerfile" ]; then
+    print_error "Dockerfile not found. Please run this script from the project root."
+    exit 1
+fi
+
+# Try building with docker compose
+print_status "Attempting build with $DOCKER_COMPOSE_CMD..."
+if $DOCKER_COMPOSE_CMD build whatsapp-api; then
+    print_status "✅ Build completed successfully with docker compose"
+else
+    BUILD_EXIT_CODE=$?
+    print_warning "Build with docker compose failed (exit code: $BUILD_EXIT_CODE)"
+    print_warning "Trying alternative build method..."
+    
+    # Alternative: use docker build directly with proper context
+    print_status "Building with docker build directly..."
+    IMAGE_NAME="whatsapp-api:latest"
+    PROJECT_NAME=$(basename $(pwd) | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+    COMPOSE_IMAGE_NAME="${PROJECT_NAME}_whatsapp-api"
+    
+    if docker build -t "$IMAGE_NAME" -f Dockerfile .; then
+        print_status "✅ Image built successfully with docker build"
+        # Tag it so docker-compose can use it
+        docker tag "$IMAGE_NAME" "$COMPOSE_IMAGE_NAME:latest" 2>/dev/null || true
+        print_status "Tagged image as $COMPOSE_IMAGE_NAME:latest"
+    else
+        print_error "❌ Build failed with both methods. Check Dockerfile and try again."
+        print_error "Make sure Docker is running and you have proper permissions."
+        exit 1
+    fi
+fi
 
 # Start
 print_status "Starting container..."
-docker-compose up -d
+$DOCKER_COMPOSE_CMD up -d
 
 # Wait for container to be ready
 print_status "Waiting for container to be ready..."
 sleep 10
 
 # Check container status
-if docker-compose ps | grep -q "Up"; then
+if $DOCKER_COMPOSE_CMD ps | grep -q "Up"; then
     print_status "✅ Container is running successfully!"
 else
-    print_error "❌ Container failed to start. Check logs with: docker-compose logs"
+    print_error "❌ Container failed to start. Check logs with: $DOCKER_COMPOSE_CMD logs"
     exit 1
 fi
 
 # Show logs for the first few seconds
 print_status "Showing recent logs..."
-docker-compose logs --tail=20
+$DOCKER_COMPOSE_CMD logs --tail=20
 
 print_status "🎉 Deployment completed successfully!"
 print_status "📱 WhatsApp session is preserved in ./whatsapp-session"
@@ -134,7 +178,7 @@ fi
 echo ""
 print_warning "Important notes:"
 echo "  - WhatsApp session is preserved in the ./whatsapp-session directory"
-echo "  - If you need to scan QR code again, check logs: docker-compose logs -f"
-echo "  - To view API logs: docker-compose logs -f whatsapp-api"
-echo "  - To restart: docker-compose restart"
-echo "  - To stop: docker-compose down"
+echo "  - If you need to scan QR code again, check logs: $DOCKER_COMPOSE_CMD logs -f"
+echo "  - To view API logs: $DOCKER_COMPOSE_CMD logs -f whatsapp-api"
+echo "  - To restart: $DOCKER_COMPOSE_CMD restart"
+echo "  - To stop: $DOCKER_COMPOSE_CMD down"
