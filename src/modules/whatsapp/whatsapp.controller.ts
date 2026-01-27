@@ -7,6 +7,7 @@ import {
   ApiTags,
   ApiConsumes,
   ApiProduces,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { SendDto } from './dtos/send.dto';
 import { SendMessageResponseDto } from './dtos/send-message-response.dto';
@@ -41,6 +42,7 @@ import { WebhookConfigDto } from './dtos/webhook-config.dto';
 import { WebhookConfigResponseDto } from './dtos/webhook-config-response.dto';
 
 @ApiTags('WhatsApp')
+@ApiBearerAuth('bearer')
 @Controller('whatsapp')
 export class WhatsAppController {
   constructor(private readonly whatsappService: WhatsAppService) {}
