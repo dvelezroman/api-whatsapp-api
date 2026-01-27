@@ -520,6 +520,50 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
+  /**
+   * Remove corrupted session after LOGOUT
+   * This forces WhatsApp to generate a new QR code
+   */
+  private async removeCorruptedSession(): Promise<void> {
+    try {
+      const sessionPath = path.resolve('./whatsapp-session');
+      
+      if (!fs.existsSync(sessionPath)) {
+        this.logger.log('Session directory does not exist, nothing to remove');
+        return;
+      }
+
+      this.logger.warn('Removing corrupted session after LOGOUT...');
+      
+      // Create a backup before removing (just in case)
+      const backupPath = `${sessionPath}-logout-backup-${Date.now()}`;
+      try {
+        await execAsync(`cp -r "${sessionPath}" "${backupPath}" 2>/dev/null || true`);
+        this.logger.log(`Session backed up to: ${backupPath}`);
+      } catch (backupError: any) {
+        this.logger.warn(`Could not backup session: ${backupError.message}`);
+      }
+
+      // Remove the session directory
+      try {
+        await execAsync(`rm -rf "${sessionPath}"`);
+        this.logger.log('Corrupted session removed successfully');
+        
+        // Recreate empty directory
+        fs.mkdirSync(sessionPath, { recursive: true });
+        this.logger.log('New empty session directory created');
+      } catch (removeError: any) {
+        this.logger.error(`Error removing session: ${removeError.message}`);
+        // Try to at least clean lock files
+        await this.cleanupChromiumLocks();
+      }
+    } catch (error: any) {
+      this.logger.warn(`Error removing corrupted session: ${error.message}`);
+      // Fallback: at least clean locks
+      await this.cleanupChromiumLocks();
+    }
+  }
+
   async onModuleInit() {
     this.logger.log('Initializing WhatsApp Client...');
 
@@ -910,7 +954,7 @@ export class WhatsAppService implements OnModuleInit {
       // Handle LOGOUT specifically - session was closed, need to clean up and reinitialize
       if (reasonStr === 'LOGOUT') {
         this.logger.warn(
-          'WhatsApp session was logged out. This may require a new QR code scan.',
+          'WhatsApp session was logged out. Removing corrupted session and will require a new QR code scan.',
         );
 
         // Clear any existing retry timeout
@@ -919,13 +963,18 @@ export class WhatsAppService implements OnModuleInit {
           this.initializationRetryTimeout = null;
         }
 
-        // Clean up the client properly before reinitializing
-        this.cleanupClientSafely().then(() => {
+        // Clean up the client properly, remove corrupted session, then reinitialize
+        this.cleanupClientSafely().then(async () => {
+          // Remove corrupted session to force fresh authentication
+          await this.removeCorruptedSession();
+          
           // Wait a bit before reinitializing to allow cleanup to complete
           setTimeout(() => {
-            this.logger.log('Reinitializing after LOGOUT...');
+            this.logger.log('Reinitializing after LOGOUT with fresh session...');
+            // Reset initialization attempts to allow fresh start
+            this.initializationAttempts = 0;
             this.initializeClientWithRetry();
-          }, 3000);
+          }, 5000); // Increased delay to ensure cleanup completes
         });
       } else if (
         // Attempt to reconnect if it was an unexpected disconnect
