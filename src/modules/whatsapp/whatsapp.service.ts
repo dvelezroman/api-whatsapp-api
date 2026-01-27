@@ -527,18 +527,20 @@ export class WhatsAppService implements OnModuleInit {
   private async removeCorruptedSession(): Promise<void> {
     try {
       const sessionPath = path.resolve('./whatsapp-session');
-      
+
       if (!fs.existsSync(sessionPath)) {
         this.logger.log('Session directory does not exist, nothing to remove');
         return;
       }
 
       this.logger.warn('Removing corrupted session after LOGOUT...');
-      
+
       // Create a backup before removing (just in case)
       const backupPath = `${sessionPath}-logout-backup-${Date.now()}`;
       try {
-        await execAsync(`cp -r "${sessionPath}" "${backupPath}" 2>/dev/null || true`);
+        await execAsync(
+          `cp -r "${sessionPath}" "${backupPath}" 2>/dev/null || true`,
+        );
         this.logger.log(`Session backed up to: ${backupPath}`);
       } catch (backupError: any) {
         this.logger.warn(`Could not backup session: ${backupError.message}`);
@@ -548,7 +550,7 @@ export class WhatsAppService implements OnModuleInit {
       try {
         await execAsync(`rm -rf "${sessionPath}"`);
         this.logger.log('Corrupted session removed successfully');
-        
+
         // Recreate empty directory
         fs.mkdirSync(sessionPath, { recursive: true });
         this.logger.log('New empty session directory created');
@@ -726,7 +728,6 @@ export class WhatsAppService implements OnModuleInit {
             '--disable-datasaver-prompt', // Disable data saver prompt
             '--disable-domain-reliability', // Disable domain reliability
             '--disable-features=TranslateUI', // Disable translate UI
-            '--disable-ipc-flooding-protection', // Already present but keep for emphasis
             '--disable-notifications', // Disable notifications
             '--disable-reading-from-canvas', // Disable canvas reading
             '--disable-remote-fonts', // Disable remote fonts
@@ -739,6 +740,8 @@ export class WhatsAppService implements OnModuleInit {
             '--no-pings', // Disable pings
             '--noerrdialogs', // No error dialogs
             '--disable-infobars', // Disable info bars
+            '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', // Use realistic user agent
+            '--window-size=1920,1080', // Set realistic window size
           ],
           headless: true,
           timeout: 60000, // 60 second timeout
@@ -833,9 +836,30 @@ export class WhatsAppService implements OnModuleInit {
 
       try {
         this.logger.log('WhatsApp Client is ready!');
+        this.logger.log(
+          'Client state: authenticated=' +
+            this.isClientAuthenticated +
+            ', ready=' +
+            this.isClientReady,
+        );
         this.qrCodeData = null; // No QR needed anymore
         this.isClientReady = true; // Mark client as ready
         this.initializationAttempts = 0; // Reset attempts on success
+
+        // Log client info for debugging
+        try {
+          const clientInfo = await this.client.info;
+          this.logger.log(
+            'Client info: ' +
+              JSON.stringify({
+                wid: clientInfo?.wid?.user,
+                pushname: clientInfo?.pushname,
+                platform: clientInfo?.platform,
+              }),
+          );
+        } catch (infoError: any) {
+          this.logger.warn('Could not get client info: ' + infoError.message);
+        }
 
         // Bypass CSP after client is ready (with error handling)
         try {
@@ -929,11 +953,19 @@ export class WhatsAppService implements OnModuleInit {
 
     this.client.on('authenticated', async () => {
       this.logger.log('WhatsApp Client authenticated successfully!');
+      this.logger.log('Authentication timestamp: ' + new Date().toISOString());
       this.isClientAuthenticated = true; // Mark client as authenticated
       this.qrCodeData = null; // Clear QR code after authentication
 
       // Try to bypass CSP early after authentication
-      await this.bypassCSP();
+      try {
+        await this.bypassCSP();
+        this.logger.log('CSP bypass completed after authentication');
+      } catch (cspError: any) {
+        this.logger.warn(
+          'CSP bypass failed after authentication: ' + cspError.message,
+        );
+      }
     });
 
     this.client.on('auth_failure', (msg) => {
@@ -946,6 +978,9 @@ export class WhatsAppService implements OnModuleInit {
     this.client.on('disconnected', (reason) => {
       const reasonStr = String(reason);
       this.logger.warn(`WhatsApp Client disconnected: ${reasonStr}`);
+      this.logger.warn(
+        `Disconnect context: wasReady=${this.isClientReady}, wasAuthenticated=${this.isClientAuthenticated}, wasInitialized=${!!this.client}`,
+      );
       this.isClientReady = false;
       this.isClientAuthenticated = false;
       this.webHelpersInjected = false;
@@ -953,8 +988,14 @@ export class WhatsAppService implements OnModuleInit {
 
       // Handle LOGOUT specifically - session was closed, need to clean up and reinitialize
       if (reasonStr === 'LOGOUT') {
+        const timeSinceReady = this.isClientReady
+          ? 'LOGOUT occurred after client was ready'
+          : 'LOGOUT occurred before client was ready';
         this.logger.warn(
-          'WhatsApp session was logged out. Removing corrupted session and will require a new QR code scan.',
+          `WhatsApp session was logged out. ${timeSinceReady}. Removing corrupted session and will require a new QR code scan.`,
+        );
+        this.logger.warn(
+          `LOGOUT reason details: reason="${reasonStr}", wasReady=${this.isClientReady}, wasAuthenticated=${this.isClientAuthenticated}`,
         );
 
         // Clear any existing retry timeout
@@ -963,19 +1004,31 @@ export class WhatsAppService implements OnModuleInit {
           this.initializationRetryTimeout = null;
         }
 
+        // If LOGOUT happened immediately after ready, it's likely a session conflict
+        // Wait longer before cleaning up to avoid race conditions
+        const cleanupDelay = this.isClientReady ? 10000 : 5000; // 10s if was ready, 5s otherwise
+
+        this.logger.warn(
+          `Waiting ${cleanupDelay}ms before cleanup to avoid race conditions...`,
+        );
+
         // Clean up the client properly, remove corrupted session, then reinitialize
-        this.cleanupClientSafely().then(async () => {
+        setTimeout(async () => {
+          await this.cleanupClientSafely();
+
           // Remove corrupted session to force fresh authentication
           await this.removeCorruptedSession();
-          
+
           // Wait a bit before reinitializing to allow cleanup to complete
           setTimeout(() => {
-            this.logger.log('Reinitializing after LOGOUT with fresh session...');
+            this.logger.log(
+              'Reinitializing after LOGOUT with fresh session...',
+            );
             // Reset initialization attempts to allow fresh start
             this.initializationAttempts = 0;
             this.initializeClientWithRetry();
-          }, 5000); // Increased delay to ensure cleanup completes
-        });
+          }, 5000); // Additional delay before reinitializing
+        }, cleanupDelay);
       } else if (
         // Attempt to reconnect if it was an unexpected disconnect
         reasonStr === 'NAVIGATION' ||
