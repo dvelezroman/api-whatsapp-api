@@ -25,7 +25,8 @@ FROM node:22-slim
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install Chromium and dependencies for Puppeteer 18.2.1
+# Install latest Chromium and dependencies
+# Using Debian's latest available version which is regularly updated
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     fonts-liberation \
@@ -65,8 +66,14 @@ RUN apt-get update && apt-get install -y \
     libxtst6 \
     xdg-utils \
     curl \
-    chromium \
     --no-install-recommends && \
+    # Install latest Chromium available in Debian repositories
+    # This will get the most recent version available for the Debian version
+    apt-get install -y chromium chromium-driver \
+    --no-install-recommends && \
+    # Verify Chromium installation and version
+    echo "Chromium version:" && chromium --version && \
+    # Clean up
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
