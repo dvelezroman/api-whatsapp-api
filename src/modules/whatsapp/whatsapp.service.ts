@@ -160,8 +160,11 @@ export class WhatsAppService implements OnModuleInit {
       this.removeLockFilesRecursive(sessionPath);
 
       // Also specifically check common locations with more paths
+      // CRITICAL: session/SingletonLock is the main lock file that prevents Chromium from starting
       const commonLockPaths = [
         'SingletonLock',
+        'session/SingletonLock', // CRITICAL: This is the main lock file location
+        'session/SingletonCookie',
         'lockfile',
         '.lock',
         'SingletonCookie',
@@ -234,6 +237,24 @@ export class WhatsAppService implements OnModuleInit {
         // Wait between attempts
         if (attempt < 2) {
           await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+
+      // CRITICAL: Force remove SingletonLock specifically (most common cause of failures)
+      const singletonLockPath = path.join(sessionPath, 'session', 'SingletonLock');
+      if (fs.existsSync(singletonLockPath)) {
+        try {
+          this.logger.warn(`Force removing critical SingletonLock: ${singletonLockPath}`);
+          fs.chmodSync(singletonLockPath, 0o666);
+          fs.unlinkSync(singletonLockPath);
+          this.logger.log(`Successfully removed SingletonLock: ${singletonLockPath}`);
+        } catch (error: any) {
+          this.logger.warn(`Could not remove SingletonLock directly: ${error.message}`);
+          try {
+            await execAsync(`rm -f "${singletonLockPath}"`);
+          } catch {
+            // Ignore
+          }
         }
       }
 
@@ -684,6 +705,24 @@ export class WhatsAppService implements OnModuleInit {
       // LocalAuth maneja su propio userDataDir automáticamente
       // NO podemos especificar userDataDir en Puppeteer (incompatible con LocalAuth)
       const sessionPath = path.resolve('./whatsapp-session');
+
+      // CRITICAL: Double-check SingletonLock is removed right before initialization
+      const singletonLockPath = path.join(sessionPath, 'session', 'SingletonLock');
+      if (fs.existsSync(singletonLockPath)) {
+        this.logger.warn('SingletonLock still exists before initialization, force removing...');
+        try {
+          fs.chmodSync(singletonLockPath, 0o666);
+          fs.unlinkSync(singletonLockPath);
+          this.logger.log('SingletonLock removed successfully before initialization');
+        } catch (error: any) {
+          this.logger.warn(`Could not remove SingletonLock: ${error.message}`);
+          try {
+            await execAsync(`rm -f "${singletonLockPath}"`);
+          } catch {
+            // Ignore
+          }
+        }
+      }
 
       // ✅ REGLA DE ORO: Crear directorio si no existe
       if (!fs.existsSync(sessionPath)) {
