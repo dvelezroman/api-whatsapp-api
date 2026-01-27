@@ -23,6 +23,7 @@ export class WhatsAppService implements OnModuleInit {
   private initializationAttempts: number = 0; // Track initialization attempts
   private maxInitializationAttempts: number = 5; // Maximum retry attempts
   private initializationRetryTimeout: NodeJS.Timeout | null = null; // Retry timeout reference
+  private isInitializing: boolean = false; // Prevent multiple simultaneous initializations
 
   // Webhook configuration
   private webhookConfig: {
@@ -588,6 +589,7 @@ export class WhatsAppService implements OnModuleInit {
         // Don't crash, just reinitialize
         this.cleanupClientSafely().then(() => {
           setTimeout(() => {
+            this.isInitializing = false; // Reset flag before retry
             this.initializeClientWithRetry();
           }, 5000);
         });
@@ -602,12 +604,21 @@ export class WhatsAppService implements OnModuleInit {
   }
 
   private async initializeClientWithRetry() {
+    // Prevent multiple simultaneous initializations
+    if (this.isInitializing) {
+      this.logger.warn(
+        'Initialization already in progress, skipping duplicate call...',
+      );
+      return;
+    }
+
     this.initializationAttempts++;
 
     if (this.initializationAttempts > this.maxInitializationAttempts) {
       this.logger.error(
         `Failed to initialize WhatsApp client after ${this.maxInitializationAttempts} attempts. Please check the logs and restart the service.`,
       );
+      this.isInitializing = false;
       return;
     }
 
@@ -621,6 +632,11 @@ export class WhatsAppService implements OnModuleInit {
       );
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
+
+    this.isInitializing = true;
+    this.logger.log(
+      `Starting initialization attempt ${this.initializationAttempts}/${this.maxInitializationAttempts}...`,
+    );
 
     try {
       // Clean up previous client if it exists
@@ -761,6 +777,7 @@ export class WhatsAppService implements OnModuleInit {
 
       // Reset attempts on successful initialization
       this.initializationAttempts = 0;
+      this.isInitializing = false;
     } catch (error) {
       this.logger.error(
         `Error initializing WhatsApp client (attempt ${this.initializationAttempts}/${this.maxInitializationAttempts}): ${error.message}`,
@@ -788,12 +805,14 @@ export class WhatsAppService implements OnModuleInit {
         }
         // Schedule retry
         this.initializationRetryTimeout = setTimeout(() => {
+          this.isInitializing = false; // Reset flag before retry
           this.initializeClientWithRetry();
         }, 5000);
       } else {
         // For other errors, retry with exponential backoff
         this.initializationRetryTimeout = setTimeout(
           () => {
+            this.isInitializing = false; // Reset flag before retry
             this.initializeClientWithRetry();
           },
           Math.min(1000 * Math.pow(2, this.initializationAttempts), 30000),
@@ -1026,6 +1045,7 @@ export class WhatsAppService implements OnModuleInit {
             );
             // Reset initialization attempts to allow fresh start
             this.initializationAttempts = 0;
+            this.isInitializing = false; // Reset flag before retry
             this.initializeClientWithRetry();
           }, 5000); // Additional delay before reinitializing
         }, cleanupDelay);
